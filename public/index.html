@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TrailCoach</title>
+<meta name="theme-color" content="#151f19">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="/styles.css">
+<script>
+  // Aplicar el tema guardado antes de pintar, para evitar parpadeo.
+  try {
+    var t = localStorage.getItem('tc_theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+</script>
+</head>
+<body>
+
+<div id="login" class="login-wrap" style="display:none">
+  <div class="login-box card">
+    <div class="brand" style="margin-bottom:10px"><img src="/icons/logo-mark-128.png" alt=""><div><div>TrailCoach</div><small>Adam Trail Academy</small></div></div>
+    <p class="muted">Acceso privado</p>
+    <label>Contraseña</label>
+    <input id="loginPass" type="password" autocomplete="current-password">
+    <p id="loginErr" class="small" style="color:var(--danger)"></p>
+    <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.login()">Entrar</button>
+  </div>
+</div>
+
+<div id="app" style="display:none">
+  <div class="topbar">
+    <div class="container">
+      <div class="brand"><img src="/icons/logo-mark-128.png" alt=""><div>TrailCoach<small>Adam Trail Academy</small></div></div>
+      <button class="ghost profile-btn" onclick="switchTab('ajustes')" aria-label="Perfil y ajustes"></button>
+    </div>
+  </div>
+
+  <main class="container">
+    <section id="view-hoy" class="view"></section>
+    <section id="view-plan" class="view"></section>
+    <section id="view-historial" class="view"></section>
+    <section id="view-analisis" class="view"></section>
+    <section id="view-ajustes" class="view"></section>
+  </main>
+
+  <nav class="tabbar">
+    <button data-tab="hoy"></button>
+    <button data-tab="plan"></button>
+    <button data-tab="historial"></button>
+    <button data-tab="analisis"></button>
+  </nav>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

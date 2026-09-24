@@ -1,0 +1,38 @@
+services:
+  trailcoach:
+    build: .
+    container_name: trailcoach
+    restart: unless-stopped
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
+      STRAVA_REDIRECT_URI: ${STRAVA_REDIRECT_URI:-}
+      TZ_ATHLETE: ${TZ_ATHLETE:-Europe/Madrid}
+    volumes:
+      - trailcoach-data:/data
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: trailcoach-caddy
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - trailcoach
+
+volumes:
+  trailcoach-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,4 @@
+{$DOMAIN} {
+	reverse_proxy trailcoach:3000
+	encode gzip
+}
