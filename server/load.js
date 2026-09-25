@@ -39,9 +39,17 @@ export function activityLoad(a, userId) {
   return Math.round(trimp(min, hrr) + extraVert);
 }
 
-// Serie diaria de carga, CTL, ATL y TSB entre dos fechas, para un usuario concreto
+// Serie diaria de carga, CTL, ATL y TSB entre dos fechas, para un usuario concreto.
+// El "precalentamiento" se ancla a `to` (no a `from`): así el CTL/ATL de un día concreto da
+// siempre el mismo número sin importar qué rango de fechas pida quien llama (por ejemplo, Hoy
+// pide un solo día y Análisis pide varios meses para el gráfico — antes eso hacía que "Forma"
+// mostrara números distintos en cada pantalla). 400 días de margen es más que de sobra para que
+// una media de 42 días (CTL) esté totalmente convergida, así que el resultado no cambia aunque
+// el historial real del atleta sea más largo.
 export function fitnessSeries(userId, from, to, { includePlanned = false } = {}) {
-  const start = addDays(from, -120); // precalentar las medias
+  const WARMUP_DAYS = 400;
+  const warmStart = addDays(to, -WARMUP_DAYS);
+  const start = from < warmStart ? from : warmStart; // el que sea más antiguo (comparación ISO)
   const acts = db.prepare('SELECT date, SUM(load) l FROM activities WHERE user_id = ? AND date BETWEEN ? AND ? GROUP BY date').all(userId, start, to);
   const map = Object.fromEntries(acts.map(r => [r.date, r.l]));
   if (includePlanned) {

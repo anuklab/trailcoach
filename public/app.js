@@ -805,6 +805,12 @@ async function renderHistorial() {
           <button onclick="stravaSync(false)">Sincronizar</button>
           <button class="danger" onclick="stravaDisconnect()">Desconectar</button>
         </div>` : `<button class="primary" style="width:100%" onclick="stravaConnect()">Conectar con Strava</button>`}
+      <p class="small muted" style="margin-top:10px">
+        ¿Relojes COROS o Suunto? No hace falta conectarlos aquí uno a uno: activa la
+        sincronización automática con Strava desde la app COROS (Perfil → Ajustes → Apps de
+        terceros → Strava) o la app Suunto (Ajustes → Asociaciones → Strava), y en cuanto termines
+        un entreno llegará solo a Strava y de ahí a TrailCoach la próxima vez que sincronices.
+      </p>
     </div>
     <div class="card tight" style="cursor:pointer" onclick="togglePastRaces()">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -1228,6 +1234,22 @@ function enterApp() {
   loadKnowledge();
   switchTab('hoy');
   registerSW();
+  autoSyncStrava();
+}
+// Sincroniza Strava sola al abrir la app (sin que haga falta tocar "Sincronizar"), para que un
+// entreno hecho con el reloj (COROS/Suunto → Strava → aquí) aparezca sin pasos manuales. Se limita
+// a como mucho una vez cada 20 minutos para no golpear la API de Strava en cada apertura de la app.
+async function autoSyncStrava() {
+  try {
+    const last = +(localStorage.getItem('tc_last_autosync') || 0);
+    if (Date.now() - last < 20 * 60 * 1000) return;
+    const st = await get('/strava/status');
+    if (!st.connected) return;
+    localStorage.setItem('tc_last_autosync', String(Date.now()));
+    const r = await post('/strava/sync', { full: false });
+    if (r.imported) { toast(`${r.imported} actividad(es) de Strava sincronizadas`); if (currentTab === 'hoy') render('hoy'); if (currentTab === 'historial') render('historial'); }
+    if (r.unlogged_nutrition && r.unlogged_nutrition.length) postSyncNutritionPrompt(r.unlogged_nutrition);
+  } catch {}
 }
 // Registro del service worker + detección automática de nueva versión: en cuanto hay una
 // versión nueva instalada, le pedimos que tome el control ya y recargamos la página una vez,
