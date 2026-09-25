@@ -46,6 +46,7 @@ export async function createCheckoutSession(user, plan, baseUrl) {
     subscription_data: trialDaysLeft ? { trial_period_days: trialDaysLeft } : undefined,
     success_url: `${baseUrl}/?billing=ok`,
     cancel_url: `${baseUrl}/?billing=cancelled`,
+    managed_payments: { enabled: false },
   });
   return session.url;
 }
