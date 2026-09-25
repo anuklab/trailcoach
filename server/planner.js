@@ -9,10 +9,10 @@ const RUN_TYPES = `('Run','TrailRun','Hike','Walk','VirtualRun')`;
 // ---------- Estimaciones a partir del historial ----------
 
 // "Km-esfuerzo": km + D+/100. Estimamos el tiempo de carrera con una ley de potencia (tipo Riegel).
-export function estimateRaceHours(race) {
+export function estimateRaceHours(userId, race) {
   const ekm = (race.distance_km || 0) + (race.dplus_m || 0) / 100;
   if (!ekm) return null;
-  const past = db.prepare('SELECT distance_km, dplus_m, time_min FROM past_races WHERE time_min > 0 AND distance_km > 0').all()
+  const past = db.prepare('SELECT distance_km, dplus_m, time_min FROM past_races WHERE user_id = ? AND time_min > 0 AND distance_km > 0').all(userId)
     .map(p => ({ ekm: p.distance_km + (p.dplus_m || 0) / 100, h: p.time_min / 60 }))
     .filter(p => p.ekm > 15);
   let ref;
@@ -21,7 +21,7 @@ export function estimateRaceHours(race) {
     ref = past.sort((a, b) => b.ekm - a.ekm)[0];
   } else {
     const act = db.prepare(`SELECT distance_m, elevation_gain_m, elapsed_time_s FROM activities
-      WHERE sport_type IN ${RUN_TYPES} AND moving_time_s > 7200 ORDER BY (distance_m/1000 + elevation_gain_m/100) DESC LIMIT 1`).get();
+      WHERE user_id = ? AND sport_type IN ${RUN_TYPES} AND moving_time_s > 7200 ORDER BY (distance_m/1000 + elevation_gain_m/100) DESC LIMIT 1`).get(userId);
     if (act) ref = { ekm: act.distance_m / 1000 + act.elevation_gain_m / 100, h: act.elapsed_time_s / 3600 * 1.05 };
     else ref = { ekm: 50, h: 50 / 7.5 };
   }
@@ -30,9 +30,9 @@ export function estimateRaceHours(race) {
 }
 
 // Valora si el objetivo de tiempo que ha puesto el atleta es realista, comparado con la estimación del modelo.
-export function targetFeasibility(race) {
+export function targetFeasibility(userId, race) {
   if (!race.target_time_h) return null;
-  const est = estimateRaceHours(race);
+  const est = estimateRaceHours(userId, race);
   if (!est) return { level: 'sin_datos', message: 'Añade un track GPX o alguna carrera pasada para poder valorar el objetivo.' };
   const ratio = race.target_time_h / est; // <1 = objetivo más rápido que la estimación
   let level, message;
@@ -44,23 +44,23 @@ export function targetFeasibility(race) {
   return { level, message, estimate_h: est };
 }
 
-function recentBaseline(from) {
+function recentBaseline(userId, from) {
   const w6 = addDays(from, -42);
-  const act = db.prepare(`SELECT SUM(moving_time_s)/60.0 m FROM activities WHERE date >= ? AND date < ?`).get(w6, from);
+  const act = db.prepare(`SELECT SUM(moving_time_s)/60.0 m FROM activities WHERE user_id = ? AND date >= ? AND date < ?`).get(userId, w6, from);
   const actualWeekly = (act?.m || 0) / 6;
-  const longest = db.prepare(`SELECT MAX(moving_time_s)/60.0 m FROM activities WHERE sport_type IN ${RUN_TYPES} AND date >= ? AND date < ?`)
-    .get(addDays(from, -56), from)?.m || 0;
+  const longest = db.prepare(`SELECT MAX(moving_time_s)/60.0 m FROM activities WHERE user_id = ? AND sport_type IN ${RUN_TYPES} AND date >= ? AND date < ?`)
+    .get(userId, addDays(from, -56), from)?.m || 0;
 
   // Si ya hay plan en las 3 semanas anteriores, seguimos desde él corregido por cumplimiento
   const w3 = addDays(mondayOf(from), -21);
   const weeks = db.prepare(`SELECT week_start, phase, SUM(duration_min) planned,
       SUM(CASE WHEN status IN ('done','partial') THEN duration_min ELSE 0 END) done
-      FROM sessions WHERE week_start >= ? AND week_start < ? AND type != 'rest' GROUP BY week_start ORDER BY week_start`).all(w3, mondayOf(from));
+      FROM sessions WHERE user_id = ? AND week_start >= ? AND week_start < ? AND type != 'rest' GROUP BY week_start ORDER BY week_start`).all(userId, w3, mondayOf(from));
   let buildMin = null, loadStreak = 0;
   if (weeks.length) {
     const loading = weeks.filter(w => ['base', 'construcción', 'específico'].includes(w.phase));
     const plannedAll = weeks.reduce((s, w) => s + w.planned, 0);
-    const actualAll = db.prepare(`SELECT SUM(moving_time_s)/60.0 m FROM activities WHERE date >= ? AND date < ?`).get(w3, mondayOf(from))?.m || 0;
+    const actualAll = db.prepare(`SELECT SUM(moving_time_s)/60.0 m FROM activities WHERE user_id = ? AND date >= ? AND date < ?`).get(userId, w3, mondayOf(from))?.m || 0;
     const compliance = plannedAll ? clamp(actualAll / plannedAll, 0.75, 1.05) : 1;
     if (loading.length) buildMin = Math.max(...loading.map(w => w.planned)) * compliance;
     for (let i = weeks.length - 1; i >= 0 && ['base', 'construcción', 'específico'].includes(weeks[i].phase); i--) loadStreak++;
@@ -74,8 +74,8 @@ function recentBaseline(from) {
 
 // ---------- Estructura semanal ----------
 
-function racesFor() {
-  return db.prepare('SELECT * FROM races ORDER BY date').all().map(r => ({ ...r, est_h: estimateRaceHours(r) }));
+function racesForUser(userId) {
+  return db.prepare('SELECT * FROM races WHERE user_id = ? ORDER BY date').all(userId).map(r => ({ ...r, est_h: estimateRaceHours(userId, r) }));
 }
 
 function phaseForWeek(ws, races) {
@@ -104,15 +104,15 @@ function phaseForWeek(ws, races) {
 
 // ---------- Generación ----------
 
-export function generatePlan({ from = null, reason = 'Plan generado' } = {}) {
-  const st = getSettings();
+export function generatePlan(userId, { from = null, reason = 'Plan generado' } = {}) {
+  const st = getSettings(userId);
   const start = from || st.plan_start || today();
-  const races = racesFor();
+  const races = racesForUser(userId);
   const main = races.filter(r => r.priority !== 'C');
   if (!main.length) return { weeks: 0, sessions: 0, message: 'Añade al menos una carrera objetivo (A o B).' };
   const end = addDays(main[main.length - 1].date, 14);
 
-  const base = recentBaseline(start);
+  const base = recentBaseline(userId, start);
   let buildMin = base.buildMin;
   let longMin = base.longMin;
   let streak = base.loadStreak;
@@ -120,7 +120,7 @@ export function generatePlan({ from = null, reason = 'Plan generado' } = {}) {
   const capMin = Math.min(st.max_week_hours * 60, availWeek);
 
   // Sesiones que respetamos: bloqueadas, modificadas a mano/IA o ya realizadas
-  const keep = db.prepare(`SELECT * FROM sessions WHERE date >= ? AND (locked = 1 OR origin != 'plan' OR status != 'planned')`).all(start);
+  const keep = db.prepare(`SELECT * FROM sessions WHERE user_id = ? AND date >= ? AND (locked = 1 OR origin != 'plan' OR status != 'planned')`).all(userId, start);
   const keepDates = new Set(keep.map(s => s.date));
 
   const out = [];
@@ -164,13 +164,13 @@ export function generatePlan({ from = null, reason = 'Plan generado' } = {}) {
   }
 
   tx(() => {
-    db.prepare(`DELETE FROM sessions WHERE date >= ? AND locked = 0 AND origin = 'plan' AND status = 'planned'`).run(start);
-    const ins = db.prepare(`INSERT INTO sessions(date,type,title,description,duration_min,dplus_m,distance_km,zone,rpe,load,key,phase,week_start,race_id)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-    for (const s of out) ins.run(s.date, s.type, s.title, s.description, s.duration_min, s.dplus_m, s.distance_km ?? null,
+    db.prepare(`DELETE FROM sessions WHERE user_id = ? AND date >= ? AND locked = 0 AND origin = 'plan' AND status = 'planned'`).run(userId, start);
+    const ins = db.prepare(`INSERT INTO sessions(user_id,date,type,title,description,duration_min,dplus_m,distance_km,zone,rpe,load,key,phase,week_start,race_id)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    for (const s of out) ins.run(userId, s.date, s.type, s.title, s.description, s.duration_min, s.dplus_m, s.distance_km ?? null,
       s.zone ?? null, s.rpe ?? null, s.load ?? 0, s.key ? 1 : 0, s.phase ?? null, s.week_start, s.race_id ?? null);
   });
-  log('plan', `${reason}: ${out.length} sesiones desde ${start}`);
+  log(userId, 'plan', `${reason}: ${out.length} sesiones desde ${start}`);
   return { from: start, sessions: out.length, weeks: Math.ceil(diffDays(start, end) / 7) };
 }
 
@@ -304,11 +304,11 @@ function finalize(sessions, w) {
 
 // ---------- Consultas ----------
 
-export function weeksOverview(from, to) {
+export function weeksOverview(userId, from, to) {
   return db.prepare(`SELECT week_start, MAX(phase) phase, SUM(duration_min) min, SUM(dplus_m) dplus, SUM(load) load,
       SUM(CASE WHEN status IN ('done','partial') THEN 1 ELSE 0 END) done,
       SUM(CASE WHEN type NOT IN ('rest') THEN 1 ELSE 0 END) n
-    FROM sessions WHERE week_start BETWEEN ? AND ? GROUP BY week_start ORDER BY week_start`).all(from, to);
+    FROM sessions WHERE user_id = ? AND week_start BETWEEN ? AND ? GROUP BY week_start ORDER BY week_start`).all(userId, from, to);
 }
 
-export { racesFor };
+export { racesForUser as racesFor };

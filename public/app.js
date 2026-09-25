@@ -61,15 +61,36 @@ function toast(msg) {
 // ---------------- API ----------------
 const Auth = {
   token: localStorage.getItem('tc_token') || null,
+  showTab(which) {
+    $('#authTabLogin').classList.toggle('active', which === 'login');
+    $('#authTabSignup').classList.toggle('active', which === 'signup');
+    $('#authFormLogin').style.display = which === 'login' ? 'block' : 'none';
+    $('#authFormSignup').style.display = which === 'signup' ? 'block' : 'none';
+  },
   async login() {
-    const pass = $('#loginPass').value;
+    const email = $('#loginEmail').value.trim();
+    const password = $('#loginPass').value;
+    $('#loginErr').textContent = '';
     try {
-      const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: pass }) });
+      const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
       const d = await r.json();
       if (!r.ok) { $('#loginErr').textContent = d.error || 'Error'; return; }
       Auth.token = d.token; localStorage.setItem('tc_token', d.token);
       boot();
     } catch (e) { $('#loginErr').textContent = 'No se pudo conectar con el servidor.'; }
+  },
+  async signup() {
+    const name = $('#signupName').value.trim();
+    const email = $('#signupEmail').value.trim();
+    const password = $('#signupPass').value;
+    $('#signupErr').textContent = '';
+    try {
+      const r = await fetch('/api/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, email, password }) });
+      const d = await r.json();
+      if (!r.ok) { $('#signupErr').textContent = d.error || 'Error'; return; }
+      Auth.token = d.token; localStorage.setItem('tc_token', d.token);
+      boot();
+    } catch (e) { $('#signupErr').textContent = 'No se pudo conectar con el servidor.'; }
   },
 };
 
@@ -193,14 +214,23 @@ async function renderHoy() {
       </div>`).join('')}
     </div>` : ''}
 
-    <div class="card">
-      <h2>Pídele algo al entrenador</h2>
-      <p class="muted small">Ej: "esta semana solo puedo 3 días", "múdame la tirada larga al domingo", "tengo una boda el sábado que viene".</p>
-      <textarea id="freeAsk" placeholder="Escribe tu petición…"></textarea>
+    <div class="card ask-coach">
+      <h2>¿Algún cambio para hoy?</h2>
+      <div class="chip-row" id="askSuggestions">
+        <div class="chip" data-v="Hoy estoy muy cansado">Estoy cansado</div>
+        <div class="chip" data-v="Hoy solo tengo 1 hora">Tengo poco tiempo</div>
+        <div class="chip" data-v="Me pesan las piernas hoy">Piernas pesadas</div>
+        <div class="chip" data-v="Esta semana solo puedo entrenar 3 días">Menos días esta semana</div>
+      </div>
+      <textarea id="freeAsk" placeholder="Escribe aquí y te ajusto el plan…"></textarea>
       <button class="primary" style="width:100%;margin-top:6px" onclick="freeAsk()">Enviar</button>
       <div id="freeAskResult"></div>
     </div>
   `;
+  $$('#askSuggestions .chip').forEach(c => c.addEventListener('click', () => {
+    $('#freeAsk').value = c.dataset.v;
+    $('#freeAsk').focus();
+  }));
 }
 
 function sessionCard(s) {
@@ -781,7 +811,7 @@ function fitnessChart(series) {
 // =================== AJUSTES ===================
 async function renderAjustes() {
   const el = $('#view-ajustes');
-  const [s, k] = await Promise.all([get('/settings'), get('/knowledge')]);
+  const [s, k, me] = await Promise.all([get('/settings'), get('/knowledge'), get('/me')]);
   const lib = k.strength_library;
   const theme = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   el.innerHTML = `
@@ -825,10 +855,11 @@ async function renderAjustes() {
     </div>
     <button class="primary" style="width:100%" onclick="saveSettings()">Guardar ajustes</button>
     <div class="card" style="margin-top:20px">
-      <h2>Sesión</h2>
-      <button class="danger" style="width:100%" onclick="logout()">Cerrar sesión</button>
+      <h2>Cuenta</h2>
+      <p class="small muted">Conectado como <strong>${esc(me.email)}</strong></p>
+      <button class="danger" style="width:100%;margin-top:6px" onclick="logout()">Cerrar sesión</button>
     </div>
-    <p class="small muted" style="text-align:center;margin-top:14px">TrailCoach · Adam Trail Academy · datos guardados en tu propio servidor</p>
+    <p class="small muted" style="text-align:center;margin-top:14px">TrailCoach · datos guardados en tu propio servidor</p>
   `;
   $$('#s-strengthmode .chip').forEach(c => c.addEventListener('click', () => {
     $$('#s-strengthmode .chip').forEach(x => x.classList.remove('selected')); c.classList.add('selected');
@@ -855,7 +886,8 @@ function setTheme(t) {
 // ---------------- Boot ----------------
 function showLogin() { $('#login').style.display = 'flex'; $('#app').style.display = 'none'; }
 async function boot() {
-  try { await get('/settings'); }
+  if (!Auth.token) { showLogin(); return; }
+  try { await get('/me'); }
   catch (e) { showLogin(); return; }
   $('#login').style.display = 'none'; $('#app').style.display = 'block';
   loadKnowledge();
@@ -863,4 +895,5 @@ async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 $('#loginPass')?.addEventListener('keydown', e => { if (e.key === 'Enter') Auth.login(); });
+$('#signupPass')?.addEventListener('keydown', e => { if (e.key === 'Enter') Auth.signup(); });
 boot();

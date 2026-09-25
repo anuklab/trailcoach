@@ -1,25 +1,27 @@
+/* --accent es el verde exacto del isotipo de TrailCoach (#7fd88f); el resto de la paleta
+   deriva de ese mismo verde para que todo el interfaz quede coherente con el logo real. */
 :root, :root[data-theme="dark"] {
   --bg: #0e1512; --panel: #151f19; --panel2: #1a251e; --border: #263a2d;
-  --text: #e9efe9; --muted: #86998c; --accent: #7fd88f; --accent-dim: #4f7a5c; --accent2: #d8b46a;
+  --text: #e9efe9; --muted: #86998c; --accent: #7fd88f; --accent-dim: #4f7a5c; --accent2: #a3c97e;
   --danger: #d97b6f; --warn: #cf9a5c; --ok: #7fd88f;
-  --z1: #6f9fc2; --z2: #7fd88f; --z3: #d8b46a; --z4: #cf8a5c; --z5: #c06a5c;
+  --z1: #6f9fc2; --z2: #7fd88f; --z3: #a3c97e; --z4: #cf8a5c; --z5: #c06a5c;
   --radius: 12px;
   font-size: 16px;
   color-scheme: dark;
 }
 :root[data-theme="light"] {
   --bg: #f4f6f2; --panel: #ffffff; --panel2: #eef2ea; --border: #dbe3d6;
-  --text: #1b241d; --muted: #5c6b5f; --accent: #2f7a45; --accent-dim: #bfe0c8; --accent2: #9a6f2b;
+  --text: #1b241d; --muted: #5c6b5f; --accent: #2f7a45; --accent-dim: #bfe0c8; --accent2: #5c7a2f;
   --danger: #b0473c; --warn: #a06a1f; --ok: #2f7a45;
-  --z1: #3a72a6; --z2: #2f7a45; --z3: #a06a1f; --z4: #a2601f; --z5: #a5402f;
+  --z1: #3a72a6; --z2: #2f7a45; --z3: #5c7a2f; --z4: #a2601f; --z5: #a5402f;
   color-scheme: light;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     --bg: #f4f6f2; --panel: #ffffff; --panel2: #eef2ea; --border: #dbe3d6;
-    --text: #1b241d; --muted: #5c6b5f; --accent: #2f7a45; --accent-dim: #bfe0c8; --accent2: #9a6f2b;
+    --text: #1b241d; --muted: #5c6b5f; --accent: #2f7a45; --accent-dim: #bfe0c8; --accent2: #5c7a2f;
     --danger: #b0473c; --warn: #a06a1f; --ok: #2f7a45;
-    --z1: #3a72a6; --z2: #2f7a45; --z3: #a06a1f; --z4: #a2601f; --z5: #a5402f;
+    --z1: #3a72a6; --z2: #2f7a45; --z3: #5c7a2f; --z4: #a2601f; --z5: #a5402f;
     color-scheme: light;
   }
 }
@@ -87,6 +89,12 @@ label { display: block; font-size: .82rem; color: var(--muted); margin: .6em 0 .
 @keyframes up { from { transform: translateY(10px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .login-box { max-width: 360px; width: 100%; }
+.brand-center { justify-content: center; }
+.brand-center img { width: 56px; height: 56px; }
+.auth-tabs { display: flex; gap: 4px; background: var(--panel2); border-radius: 999px; padding: 3px; margin-bottom: 16px; }
+.auth-tabs button { flex: 1; border: none; background: transparent; padding: .55em 0; border-radius: 999px; font-weight: 600; font-size: .88rem; color: var(--muted); cursor: pointer; }
+.auth-tabs button.active { background: var(--accent); color: #0e1512; }
+.ask-coach .chip-row { margin-bottom: 8px; }
 .divider { height: 1px; background: var(--border); margin: 14px 0; }
 .raceline { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .raceline:last-child { border-bottom: none; }

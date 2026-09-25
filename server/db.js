@@ -1,5 +1,6 @@
 // Base de datos SQLite (módulo nativo de Node 22, sin dependencias).
 import { DatabaseSync } from 'node:sqlite';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -17,8 +18,24 @@ db.exec('PRAGMA foreign_keys = ON;');
 db.exec(`
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 
+-- Cada persona que usa la app: su cuenta, su contraseña y su propia conexión a Strava.
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT NOT NULL,
+  name TEXT,
+  settings TEXT,                     -- JSON: disponibilidad, fuerza preferida, FC, peso...
+  strava_access_token TEXT,
+  strava_refresh_token TEXT,
+  strava_expires_at INTEGER,
+  strava_athlete TEXT,               -- JSON {firstname,lastname,...}
+  strava_last_sync TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS races (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   date TEXT NOT NULL,              -- YYYY-MM-DD
   priority TEXT NOT NULL DEFAULT 'A', -- A objetivo, B preparatoria, C entreno
@@ -33,16 +50,22 @@ CREATE TABLE IF NOT EXISTS races (
   date_confirmed INTEGER DEFAULT 1,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_races_user ON races(user_id);
 
 CREATE TABLE IF NOT EXISTS past_races (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL, date TEXT NOT NULL,
   distance_km REAL, dplus_m REAL, time_min REAL,
   position TEXT, notes TEXT, strava_id INTEGER
 );
+CREATE INDEX IF NOT EXISTS idx_past_races_user ON past_races(user_id);
 
+-- id = id de la actividad en Strava (globalmente único entre todas las cuentas de Strava),
+-- o negativo si es manual. user_id identifica de quién es dentro de TrailCoach.
 CREATE TABLE IF NOT EXISTS activities (
-  id INTEGER PRIMARY KEY,          -- id de Strava (o negativo si es manual)
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT, sport_type TEXT,
   start_date_local TEXT, date TEXT,
   distance_m REAL, moving_time_s REAL, elapsed_time_s REAL,
@@ -50,10 +73,11 @@ CREATE TABLE IF NOT EXISTS activities (
   suffer_score REAL, load REAL,
   raw TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_act_date ON activities(date);
+CREATE INDEX IF NOT EXISTS idx_act_user_date ON activities(user_id, date);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   date TEXT NOT NULL,
   type TEXT NOT NULL,     -- rest, easy, long, b2b, vert, tempo, intervals, strength, cross, race, recovery
   title TEXT, description TEXT,
@@ -69,24 +93,29 @@ CREATE TABLE IF NOT EXISTS sessions (
   change_note TEXT,
   original TEXT            -- JSON de la sesión antes de modificarla
 );
-CREATE INDEX IF NOT EXISTS idx_sess_date ON sessions(date);
+CREATE INDEX IF NOT EXISTS idx_sess_user_date ON sessions(user_id, date);
 
 CREATE TABLE IF NOT EXISTS checkins (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   date TEXT NOT NULL,
   fatigue INTEGER, legs_heavy INTEGER, bad_sleep INTEGER, sick INTEGER, pain TEXT,
   available_min INTEGER, note TEXT,
   result TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_checkins_user_date ON checkins(user_id, date);
 
 CREATE TABLE IF NOT EXISTS changelog (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
   at TEXT DEFAULT CURRENT_TIMESTAMP,
   source TEXT, summary TEXT, detail TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_changelog_user ON changelog(user_id);
 
 CREATE TABLE IF NOT EXISTS nutrition_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   date TEXT NOT NULL,
   session_id INTEGER,
   minute_mark INTEGER,      -- minuto de la sesión en que se tomó
@@ -97,10 +126,11 @@ CREATE TABLE IF NOT EXISTS nutrition_logs (
   notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_nutri_date ON nutrition_logs(date);
+CREATE INDEX IF NOT EXISTS idx_nutri_user_date ON nutrition_logs(user_id, date);
 `);
 
-// Migraciones ligeras: añade columnas nuevas si la base de datos ya existía sin ellas.
+// Migraciones ligeras: añade columnas nuevas si la base de datos ya existía sin ellas
+// (por ejemplo, instancias desplegadas antes de pasar a multiusuario).
 function ensureColumn(table, col, decl) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
   if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
@@ -108,15 +138,37 @@ function ensureColumn(table, col, decl) {
 ensureColumn('races', 'target_time_h', 'REAL');
 ensureColumn('races', 'aid_stations', 'TEXT');
 ensureColumn('races', 'start_time', 'TEXT');
-
-export function getKV(key, fallback = null) {
-  const r = db.prepare('SELECT value FROM kv WHERE key = ?').get(key);
-  if (!r) return fallback;
-  try { return JSON.parse(r.value); } catch { return r.value; }
+for (const t of ['races', 'past_races', 'activities', 'sessions', 'checkins', 'nutrition_logs']) {
+  ensureColumn(t, 'user_id', 'INTEGER');
 }
-export function setKV(key, value) {
-  db.prepare('INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
-    .run(key, JSON.stringify(value));
+ensureColumn('changelog', 'user_id', 'INTEGER');
+ensureColumn('users', 'strava_last_sync', 'TEXT');
+
+// ---------- Autenticación ----------
+// scrypt (nativo en Node, sin dependencias externas) para el hash de contraseñas.
+export function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+export function verifyPassword(password, stored) {
+  if (!stored || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  const check = crypto.scryptSync(password, salt, 64).toString('hex');
+  const a = Buffer.from(hash, 'hex'), b = Buffer.from(check, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+export function createUser({ email, password, name }) {
+  const info = db.prepare('INSERT INTO users(email, password_hash, name) VALUES (?,?,?)')
+    .run(String(email).trim().toLowerCase(), hashPassword(password), name || null);
+  return getUserById(info.lastInsertRowid);
+}
+export function getUserByEmail(email) {
+  return db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE').get(String(email || '').trim());
+}
+export function getUserById(id) {
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
 export const DEFAULT_SETTINGS = {
@@ -134,13 +186,32 @@ export const DEFAULT_SETTINGS = {
   weight_kg: 70,
 };
 
-export function getSettings() {
-  return { ...DEFAULT_SETTINGS, ...(getKV('settings') || {}) };
+// Los ajustes viven por usuario, en users.settings (JSON), fusionados con los valores por defecto.
+export function getSettings(userId) {
+  const row = db.prepare('SELECT settings FROM users WHERE id = ?').get(userId);
+  let stored = {};
+  if (row?.settings) { try { stored = JSON.parse(row.settings); } catch { stored = {}; } }
+  return { ...DEFAULT_SETTINGS, ...stored };
+}
+export function setSettings(userId, patch) {
+  const merged = { ...getSettings(userId), ...patch };
+  db.prepare('UPDATE users SET settings = ? WHERE id = ?').run(JSON.stringify(merged), userId);
+  return merged;
 }
 
-export function log(source, summary, detail = null) {
-  db.prepare('INSERT INTO changelog(source, summary, detail) VALUES(?,?,?)')
-    .run(source, summary, detail ? JSON.stringify(detail) : null);
+export function getKV(key, fallback = null) {
+  const r = db.prepare('SELECT value FROM kv WHERE key = ?').get(key);
+  if (!r) return fallback;
+  try { return JSON.parse(r.value); } catch { return r.value; }
+}
+export function setKV(key, value) {
+  db.prepare('INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+    .run(key, JSON.stringify(value));
+}
+
+export function log(userId, source, summary, detail = null) {
+  db.prepare('INSERT INTO changelog(user_id, source, summary, detail) VALUES(?,?,?,?)')
+    .run(userId, source, summary, detail ? JSON.stringify(detail) : null);
 }
 
 export function tx(fn) {

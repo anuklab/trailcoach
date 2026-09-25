@@ -26,8 +26,8 @@ const SPORT_HRR = { Run: 0.66, TrailRun: 0.68, Hike: 0.55, Walk: 0.45, Ride: 0.6
   VirtualRide: 0.62, NordicSki: 0.65, BackcountrySki: 0.64, Swim: 0.6, WeightTraining: 0.5, Workout: 0.55 };
 
 // Carga real de una actividad de Strava
-export function activityLoad(a) {
-  const st = getSettings();
+export function activityLoad(a, userId) {
+  const st = getSettings(userId);
   const min = (a.moving_time_s || 0) / 60;
   let hrr;
   if (a.avg_hr && st.hr_max > st.hr_rest) {
@@ -39,13 +39,13 @@ export function activityLoad(a) {
   return Math.round(trimp(min, hrr) + extraVert);
 }
 
-// Serie diaria de carga, CTL, ATL y TSB entre dos fechas
-export function fitnessSeries(from, to, { includePlanned = false } = {}) {
+// Serie diaria de carga, CTL, ATL y TSB entre dos fechas, para un usuario concreto
+export function fitnessSeries(userId, from, to, { includePlanned = false } = {}) {
   const start = addDays(from, -120); // precalentar las medias
-  const acts = db.prepare('SELECT date, SUM(load) l FROM activities WHERE date BETWEEN ? AND ? GROUP BY date').all(start, to);
+  const acts = db.prepare('SELECT date, SUM(load) l FROM activities WHERE user_id = ? AND date BETWEEN ? AND ? GROUP BY date').all(userId, start, to);
   const map = Object.fromEntries(acts.map(r => [r.date, r.l]));
   if (includePlanned) {
-    const pl = db.prepare(`SELECT date, SUM(load) l FROM sessions WHERE date BETWEEN ? AND ? AND status='planned' GROUP BY date`).all(start, to);
+    const pl = db.prepare(`SELECT date, SUM(load) l FROM sessions WHERE user_id = ? AND date BETWEEN ? AND ? AND status='planned' GROUP BY date`).all(userId, start, to);
     for (const r of pl) if (!(r.date in map)) map[r.date] = r.l;
   }
   const kC = 1 - Math.exp(-1 / 42), kA = 1 - Math.exp(-1 / 7);
@@ -60,7 +60,7 @@ export function fitnessSeries(from, to, { includePlanned = false } = {}) {
   return out;
 }
 
-export function currentFitness(date) {
-  const s = fitnessSeries(addDays(date, -1), addDays(date, -1));
+export function currentFitness(userId, date) {
+  const s = fitnessSeries(userId, addDays(date, -1), addDays(date, -1));
   return s[s.length - 1] || { ctl: 0, atl: 0, tsb: 0 };
 }
