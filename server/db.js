@@ -136,6 +136,8 @@ for (const t of ['races', 'past_races', 'activities', 'sessions', 'checkins', 'n
 }
 ensureColumn('changelog', 'user_id', 'INTEGER');
 ensureColumn('users', 'strava_last_sync', 'TEXT');
+// legs_heavy pasa de booleano (0/1) a tri-estado (0=ligeras, 1=normales, 2=pesadas); misma columna, sin migración de datos necesaria.
+ensureColumn('checkins', 'wants_session', 'INTEGER'); // el atleta pide entrenar algo en un día marcado como descanso
 
 // Los índices por user_id se crean aquí, después de las migraciones, para garantizar
 // que la columna ya existe (en una base de datos previa a multiusuario, no existía

@@ -12,7 +12,7 @@ import { authUrl, exchangeCode, syncStrava, stravaStatus, stravaConfigured, disc
 import { adherenceStatus, monthSummary } from './adherence.js';
 import { buildPacingPlan } from './pacing.js';
 import * as Nutrition from './nutrition.js';
-import { NUTRITION_GUIDE, STRENGTH_GUIDE, STRENGTH_LIBRARY, nutritionTargetsFor } from './knowledge.js';
+import { NUTRITION_GUIDE, STRENGTH_GUIDE, STRENGTH_LIBRARY, nutritionTargetsFor, METHOD_GUIDE, hrZones, GEL_PRESETS } from './knowledge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -253,10 +253,16 @@ app.get('/api/nutrition/targets', wrap((req, res) => {
 }));
 
 // ---------- Conocimiento (guía basada en evidencia) ----------
-app.get('/api/knowledge', wrap((req, res) => res.json({
-  nutrition: NUTRITION_GUIDE, strength: STRENGTH_GUIDE,
-  strength_library: Object.fromEntries(Object.entries(STRENGTH_LIBRARY).map(([k, v]) => [k, { label: v.label, exercises: v.exercises, note: v.note || null }])),
-})));
+app.get('/api/knowledge', wrap((req, res) => {
+  const st = getSettings(req.userId);
+  res.json({
+    nutrition: NUTRITION_GUIDE, strength: STRENGTH_GUIDE,
+    strength_library: Object.fromEntries(Object.entries(STRENGTH_LIBRARY).map(([k, v]) => [k, { label: v.label, exercises: v.exercises, note: v.note || null }])),
+    method: METHOD_GUIDE,
+    zones: hrZones(st.hr_max, st.hr_rest),
+    gel_presets: GEL_PRESETS,
+  });
+}));
 
 // ---------- Frontend estático ----------
 app.use(express.static(path.join(__dirname, '..', 'public')));

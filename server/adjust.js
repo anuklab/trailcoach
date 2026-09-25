@@ -42,12 +42,23 @@ function scale(userId, s, factor, opts = {}) {
  */
 export function applyCheckin(userId, checkin) {
   const date = checkin.date || today();
-  const { fatigue = 0, legs_heavy = false, bad_sleep = false, sick = false, pain = '', available_min = null, note = '' } = checkin;
+  // legs_heavy: tri-estado 0=ligeras, 1=normales, 2=pesadas (antes era booleano; se acepta también true/false por compatibilidad).
+  const { fatigue = 0, bad_sleep = false, sick = false, pain = '', available_min = null, note = '', wants_session = false } = checkin;
+  const legsRaw = checkin.legs_heavy;
+  const legs_heavy = legsRaw === true ? 2 : legsRaw === false ? 1 : Number.isFinite(+legsRaw) ? +legsRaw : 1;
+  const legsHeavy = legs_heavy >= 2, legsLight = legs_heavy === 0;
   const changes = [];
   const todaySession = db.prepare(`SELECT * FROM sessions WHERE user_id = ? AND date = ? AND type != 'strength' ORDER BY id LIMIT 1`).get(userId, date)
     || db.prepare(`SELECT * FROM sessions WHERE user_id = ? AND date = ? ORDER BY id LIMIT 1`).get(userId, date);
 
   tx(() => {
+    // 0) Día de descanso pero el atleta quiere entrenar algo: añadimos una sesión suave sin tocar el resto del plan.
+    if (wants_session && todaySession && todaySession.type === 'rest' && !sick && !pain) {
+      const dur = Math.max(20, Math.min(available_min || 40, 75));
+      const r = applySession(userId, todaySession.id, { type: 'easy', duration_min: dur, dplus_m: 0 },
+        { note: 'Añadida a petición tuya en un día de descanso' });
+      if (r) changes.push(`Hoy: como pediste, se añade un rodaje suave de ${dur} min (el resto de la semana sigue igual).`);
+    }
     // 1) Enfermedad o dolor: parar. Convertir en descanso hoy y aligerar 2-3 días.
     if (sick || pain) {
       if (todaySession && todaySession.type !== 'rest') {
@@ -60,7 +71,7 @@ export function applyCheckin(userId, checkin) {
       for (const s of next) { const r = scale(userId, s, 0.5, { note: 'Reducida por precaución tras molestia/enfermedad' }); if (r) changes.push(`${s.date}: ${s.title} reducida a la mitad.`); }
     }
     // 2) Muy cansado / piernas muy pesadas: hoy suave o descanso, resto de la semana un poco más ligero.
-    else if (fatigue >= 4 || (legs_heavy && fatigue >= 3)) {
+    else if (fatigue >= 4 || (legsHeavy && fatigue >= 3)) {
       if (todaySession && ['vert', 'tempo', 'intervals', 'long', 'b2b'].includes(todaySession.type)) {
         const r = scale(userId, todaySession, 0.4, { note: 'Bajada de intensidad por fatiga alta' });
         if (r) changes.push(`Hoy: ${todaySession.title} → ${r.title}, más corta y suave (fatiga alta).`);
@@ -70,9 +81,13 @@ export function applyCheckin(userId, checkin) {
       for (const s of week) { const r = scale(userId, s, 0.8, { note: 'Semana aliviada por fatiga acumulada' }); if (r) changes.push(`${s.date}: ${s.title} recortada ~20%.`); }
     }
     // 3) Piernas pesadas sin más: solo suavizar la sesión de hoy si es de calidad.
-    else if (legs_heavy && todaySession && ['vert', 'tempo', 'intervals'].includes(todaySession.type)) {
+    else if (legsHeavy && todaySession && ['vert', 'tempo', 'intervals'].includes(todaySession.type)) {
       const r = scale(userId, todaySession, 0.7, { note: 'Piernas pesadas: intensidad reducida' });
       if (r) changes.push(`Hoy: ${todaySession.title} se hace más suave por piernas pesadas.`);
+    }
+    // 3b) Piernas ligeras y poca fatiga: nota positiva, sin tocar el plan (evita sobre-entrenar por exceso de confianza).
+    else if (legsLight && fatigue <= 1 && todaySession && ['vert', 'tempo', 'intervals'].includes(todaySession.type)) {
+      changes.push('Hoy: piernas ligeras, mantenemos la sesión tal cual planeada.');
     }
     // 4) Mal descanso: quitar la intensidad más dura de hoy si la hay.
     if (bad_sleep && todaySession && ['intervals', 'tempo'].includes(todaySession.type) && !sick && fatigue < 4) {
@@ -89,10 +104,10 @@ export function applyCheckin(userId, checkin) {
     }
   });
 
-  db.prepare('INSERT INTO checkins(user_id, date, fatigue, legs_heavy, bad_sleep, sick, pain, available_min, note, result) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .run(userId, date, fatigue, legs_heavy ? 1 : 0, bad_sleep ? 1 : 0, sick ? 1 : 0, pain || null, available_min, note || null,
-      changes.join(' ') || 'Sin cambios necesarios.');
-  log(userId, 'checkin', `Check-in ${date}: ${changes.length} cambios`, { fatigue, legs_heavy, bad_sleep, sick, pain, available_min, changes });
+  db.prepare('INSERT INTO checkins(user_id, date, fatigue, legs_heavy, bad_sleep, sick, pain, available_min, note, result, wants_session) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    .run(userId, date, fatigue, legs_heavy, bad_sleep ? 1 : 0, sick ? 1 : 0, pain || null, available_min, note || null,
+      changes.join(' ') || 'Sin cambios necesarios.', wants_session ? 1 : 0);
+  log(userId, 'checkin', `Check-in ${date}: ${changes.length} cambios`, { fatigue, legs_heavy, bad_sleep, sick, pain, available_min, wants_session, changes });
 
   return { date, changes, session: db.prepare('SELECT * FROM sessions WHERE user_id = ? AND date = ? ORDER BY id').all(userId, date) };
 }

@@ -66,7 +66,9 @@ function recentBaseline(userId, from) {
     for (let i = weeks.length - 1; i >= 0 && ['base', 'construcción', 'específico'].includes(weeks[i].phase); i--) loadStreak++;
   }
   return {
-    buildMin: Math.max(180, buildMin ?? actualWeekly),
+    // Suelo algo más alto que antes: con una base demasiado baja, la semana 1 queda tan corta
+    // que el reparto por días convierte casi todo en descanso aunque el atleta tenga tiempo libre.
+    buildMin: Math.max(220, buildMin ?? actualWeekly),
     longMin: Math.max(60, longest),
     loadStreak,
   };
@@ -136,7 +138,7 @@ export function generatePlan(userId, { from = null, reason = 'Plan generado' } =
       streak++;
       if (streak % 4 === 0) { phase = 'asimilación'; weekMin = buildMin * 0.7; }
       else {
-        buildMin = Math.min(peakMin, buildMin * 1.08 + 15);
+        buildMin = Math.min(peakMin, buildMin * 1.1 + 15);
         weekMin = buildMin;
         longMin = Math.min(peakLong, longMin + (phase === 'base' ? 15 : 25));
       }
@@ -257,17 +259,21 @@ function buildWeek(w) {
   const strengthMin = phase === 'recuperación' ? 30 : 40;
   remaining -= strengthDays.length * strengthMin;
 
-  // Rodajes suaves con el tiempo restante
-  const easyDays = [0, 1, 2, 3, 4, 5, 6].filter(i => !plan[i] && !restDays.has(i) && avail[i] >= 30);
+  // Rodajes suaves con el tiempo restante. Cualquier día con disponibilidad real (no marcado
+  // como descanso fijo por el atleta, es decir avail[i]=0) recibe al menos un rodaje corto:
+  // el objetivo es llegar lo mejor preparado posible al objetivo, así que preferimos muchos
+  // días cortos a convertir tiempo libre del atleta en descanso solo porque el presupuesto
+  // semanal calculado es ajustado.
+  const MIN_EASY = 20;
+  const easyDays = [0, 1, 2, 3, 4, 5, 6].filter(i => !plan[i] && !restDays.has(i) && avail[i] >= MIN_EASY);
   const cap = i => avail[i] - (strengthDays.includes(i) ? strengthMin : 0);
-  let pool = easyDays.slice();
-  while (pool.length && remaining / pool.length < 30) {
-    pool.sort((a, b) => cap(a) - cap(b)); pool.shift();
-  }
-  // reparto proporcional a la disponibilidad
-  const totalCap = pool.reduce((s, i) => s + cap(i), 0);
-  for (const i of pool) {
-    const d = clamp(remaining * cap(i) / totalCap, 30, Math.min(cap(i), phase === 'recuperación' ? 50 : 90));
+  const maxDur = phase === 'recuperación' ? 50 : 90;
+  const totalFloor = easyDays.reduce((s, i) => s + Math.min(MIN_EASY, cap(i)), 0);
+  const extra = Math.max(0, remaining - totalFloor);
+  const totalBonusCap = easyDays.reduce((s, i) => s + Math.max(0, cap(i) - MIN_EASY), 0) || 1;
+  for (const i of easyDays) {
+    const bonus = extra * Math.max(0, cap(i) - MIN_EASY) / totalBonusCap;
+    const d = clamp(MIN_EASY + bonus, Math.min(MIN_EASY, cap(i)), Math.min(cap(i), maxDur));
     plan[i] = mk(i, phase === 'recuperación' ? 'recovery' : 'easy', d, { zone: phase === 'recuperación' ? 'Z1' : 'Z1-Z2' });
   }
 

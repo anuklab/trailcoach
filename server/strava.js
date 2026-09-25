@@ -62,6 +62,7 @@ export function disconnectStrava(userId) {
 }
 
 function upsertActivity(userId, a) {
+  const isNew = !db.prepare('SELECT id FROM activities WHERE id = ? AND user_id = ?').get(a.id, userId);
   const date = (a.start_date_local || a.start_date || '').slice(0, 10);
   const row = {
     id: a.id, user_id: userId, name: a.name, sport_type: a.sport_type || a.type,
@@ -80,7 +81,7 @@ function upsertActivity(userId, a) {
       elevation_gain_m=excluded.elevation_gain_m, avg_hr=excluded.avg_hr, max_hr=excluded.max_hr,
       suffer_score=excluded.suffer_score, load=excluded.load, raw=excluded.raw
     WHERE user_id = excluded.user_id`).run(row);
-  return row;
+  return { ...row, isNew };
 }
 
 // Empareja la actividad real con la sesión planificada del mismo día (si existe y no tiene ya una), del mismo usuario.
@@ -96,17 +97,25 @@ export async function syncStrava(userId, { full = false } = {}) {
   const last = db.prepare('SELECT strava_last_sync FROM users WHERE id=?').get(userId)?.strava_last_sync;
   const after = full ? Math.floor(new Date('2015-01-01').getTime() / 1000) : Math.floor(new Date(last || addDays(today(), -400)).getTime() / 1000);
   let page = 1, total = 0;
+  const newRows = [];
   for (;;) {
     const resp = await fetch(`https://www.strava.com/api/v3/athlete/activities?after=${after}&per_page=100&page=${page}`,
       { headers: { authorization: `Bearer ${token}` } });
     if (!resp.ok) throw new Error(`Error listando actividades de Strava (${resp.status})`);
     const acts = await resp.json();
     if (!acts.length) break;
-    for (const a of acts) { const row = upsertActivity(userId, a); matchSession(userId, row); total++; }
+    for (const a of acts) { const row = upsertActivity(userId, a); matchSession(userId, row); total++; if (row.isNew) newRows.push(row); }
     page++;
     if (page > 30) break;
   }
   db.prepare('UPDATE users SET strava_last_sync=? WHERE id=?').run(new Date().toISOString(), userId);
   log(userId, 'strava', `Sincronizadas ${total} actividades`);
-  return { imported: total };
+  // Actividades nuevas de duración relevante (>15 min) sin registro nutricional todavía, para preguntar qué se tomó.
+  const unlogged = newRows
+    .filter(r => (r.moving_time_s || 0) > 900)
+    .filter(r => !db.prepare('SELECT id FROM nutrition_logs WHERE user_id = ? AND date = ?').get(userId, r.date))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 5)
+    .map(r => ({ activity_id: r.id, name: r.name, date: r.date, sport_type: r.sport_type, moving_time_s: r.moving_time_s }));
+  return { imported: total, unlogged_nutrition: unlogged };
 }

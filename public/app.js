@@ -172,9 +172,9 @@ async function renderHoy() {
     </div>` : ''}
 
     <div class="stat-grid card tight">
-      <div class="stat"><div class="v">${fitness.ctl}</div><div class="l">Forma</div></div>
-      <div class="stat"><div class="v">${fitness.atl}</div><div class="l">Fatiga</div></div>
-      <div class="stat"><div class="v" style="color:${tsbColor}">${tsb > 0 ? '+' : ''}${tsb}</div><div class="l">${tsbLabel}</div></div>
+      <div class="stat" style="cursor:pointer" onclick="metricModal('forma')"><div class="v">${fitness.ctl}</div><div class="l">Forma ${icon('info')}</div></div>
+      <div class="stat" style="cursor:pointer" onclick="metricModal('fatiga')"><div class="v">${fitness.atl}</div><div class="l">Fatiga ${icon('info')}</div></div>
+      <div class="stat" style="cursor:pointer" onclick="metricModal('fresco')"><div class="v" style="color:${tsbColor}">${tsb > 0 ? '+' : ''}${tsb}</div><div class="l">${tsbLabel} ${icon('info')}</div></div>
     </div>
 
     ${month.activities ? `
@@ -193,15 +193,18 @@ async function renderHoy() {
     <div class="card">
       <h2>¿Cómo estás hoy?</h2>
       <p class="muted small">Cuéntame cómo te encuentras y ajusto el entreno de hoy.</p>
-      <button class="primary" style="width:100%;margin-top:6px" onclick="Checkin.open('${date}')">Hacer check-in</button>
+      <button class="primary" style="width:100%;margin-top:6px" onclick="Checkin.open('${date}', ${sessions.some(s => s.type === 'rest')})">Hacer check-in</button>
     </div>` : `
     <div class="card tight" style="display:flex;justify-content:space-between;align-items:center">
       <span class="small muted">Check-in de hoy hecho</span>
-      <button class="ghost" onclick="Checkin.open('${date}')">Editar</button>
+      <button class="ghost" onclick="Checkin.open('${date}', ${sessions.some(s => s.type === 'rest')})">Editar</button>
     </div>`}
 
     <div class="card" style="margin-top:4px">
-      <h2>Entreno de hoy</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Entreno de hoy</h2>
+        <button class="ghost small" onclick="methodModal()">${icon('info')} ¿En qué se basa?</button>
+      </div>
       <div id="hoySessions">${sessions.length ? sessions.map(sessionCard).join('') : '<p class="muted">No hay nada planificado. Ve a Plan → Carreras para crear tu plan.</p>'}</div>
     </div>
 
@@ -242,7 +245,7 @@ function sessionCard(s) {
   const zones = zoneBar(s.zone);
   const changeNote = s.change_note ? `<p class="small" style="color:var(--accent2)">${icon('edit')} ${esc(s.change_note)}</p>` : '';
   return `<div class="session ${s.type === 'rest' ? 'rest' : ''}" data-id="${s.id}">
-    <div class="head">
+    <div class="head" ${s.type !== 'rest' ? `style="cursor:pointer" onclick="sessionDetailModal(${s.id})"` : ''}>
       <div><strong class="stype">${icon(TYPE_ICON[s.type] || 'wave')} ${esc(s.title)}</strong>${changeNote}</div>
       <div>${key}${badge}</div>
     </div>
@@ -250,7 +253,7 @@ function sessionCard(s) {
     <div class="meta">
       ${s.duration_min ? `<span>${hm(s.duration_min)}</span>` : ''}
       ${s.dplus_m ? `<span>${Math.round(s.dplus_m)} m D+</span>` : ''}
-      ${s.zone && s.zone !== '-' ? `<span>${s.zone}</span>` : ''}
+      ${s.zone && s.zone !== '-' ? `<span onclick="event.stopPropagation();zoneModal('${s.zone}')" style="cursor:pointer;text-decoration:underline dotted">${s.zone}</span>` : ''}
     </div>
     ${zones}
     ${s.type !== 'rest' ? `<div class="actions">
@@ -261,6 +264,28 @@ function sessionCard(s) {
       <button onclick="toggleLock(${s.id}, ${s.locked ? 0 : 1})">${s.locked ? 'Desbloquear' : 'Bloquear'}</button>
     </div>` : ''}
   </div>`;
+}
+
+// Detalle de una sesión: descripción completa + zonas de FC en ppm reales.
+async function sessionDetailModal(id) {
+  let s;
+  try { s = await get(`/sessions/${id}`); } catch (e) { toast('Error: ' + e.message); return; }
+  const zones = (K.zones || []).filter(z => (s.zone || '').split('-').includes(z.zone));
+  openModal(`
+    <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+    <h2>${icon(TYPE_ICON[s.type] || 'wave')} ${esc(s.title)}</h2>
+    <p>${esc(s.description || 'Sin descripción adicional.')}</p>
+    <div class="stat-grid" style="margin:10px 0">
+      ${s.duration_min ? `<div class="stat"><div class="v">${hm(s.duration_min)}</div><div class="l">duración</div></div>` : ''}
+      ${s.dplus_m ? `<div class="stat"><div class="v">${Math.round(s.dplus_m)}</div><div class="l">m D+</div></div>` : ''}
+      ${s.zone && s.zone !== '-' ? `<div class="stat"><div class="v">${esc(s.zone)}</div><div class="l">zona</div></div>` : ''}
+    </div>
+    ${zones.length ? `<div class="divider"></div><h3 style="text-transform:none;color:var(--text);font-size:.95rem">¿A qué pulsaciones?</h3>
+      ${zones.map(z => `<div class="zone-row">
+        <div class="z-badge" style="background:${ZCOLOR[z.zone]}">${z.zone}</div>
+        <div class="z-info"><strong>${esc(z.name)}</strong><span class="small muted">${z.bpm[0]}–${z.bpm[1]} ppm</span></div>
+      </div>`).join('')}` : ''}
+  `, { center: true });
 }
 
 function zoneBar(zone) {
@@ -299,9 +324,11 @@ async function freeAsk() {
 
 // ---------------- Check-in modal ----------------
 const Checkin = {
-  state: { fatigue: 2, legs_heavy: false, bad_sleep: false, sick: false, pain: '', available_min: null, note: '' },
-  open(date) {
+  // legs_heavy: 0=ligeras, 1=normales, 2=pesadas
+  state: { fatigue: 2, legs_heavy: 1, bad_sleep: false, sick: false, pain: '', available_min: null, note: '', wants_session: false },
+  open(date, isRestToday = false) {
     this.date = date;
+    this.state.wants_session = false;
     const bg = openModal(`
       <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
       <h2>Check-in — ${fmtDateLong(date)}</h2>
@@ -311,13 +338,20 @@ const Checkin = {
       </div>
       <label>¿Cómo notas las piernas?</label>
       <div class="chip-row" id="ci-legs">
-        <div class="chip" data-v="0">Normales</div><div class="chip" data-v="1">Pesadas</div>
+        <div class="chip" data-v="0">Ligeras</div><div class="chip" data-v="1">Normales</div><div class="chip" data-v="2">Pesadas</div>
       </div>
       <label>¿Has dormido mal?</label>
       <div class="chip-row" id="ci-sleep"><div class="chip" data-v="0">No</div><div class="chip" data-v="1">Sí</div></div>
       <label>¿Estás enfermo o con molestia/dolor?</label>
       <div class="chip-row" id="ci-sick"><div class="chip" data-v="0">No</div><div class="chip" data-v="1">Enfermo</div><div class="chip" data-v="2">Dolor/molestia</div></div>
       <div id="painField" style="display:none"><label>¿Dónde te duele?</label><input id="ci-pain" placeholder="ej: rodilla derecha"></div>
+      ${isRestToday ? `
+      <div class="card tight" style="margin:10px 0;background:var(--panel2)">
+        <label style="display:flex;align-items:center;gap:8px;margin:0">
+          <input type="checkbox" id="ci-wants" style="width:auto">
+          Hoy toca descanso, pero me apetece entrenar algo
+        </label>
+      </div>` : ''}
       <label>¿Cuánto tiempo tienes hoy? (déjalo vacío si tienes el previsto)</label>
       <input id="ci-time" type="number" placeholder="minutos disponibles">
       <label>Algo más que quieras contarme</label>
@@ -328,21 +362,23 @@ const Checkin = {
       $$(`#${id} .chip`).forEach(c => c.addEventListener('click', () => {
         if (single) $$(`#${id} .chip`).forEach(x => x.classList.remove('selected'));
         c.classList.toggle('selected');
-        this.state[key] = c.classList.contains('selected') ? +c.dataset.v : (key === 'fatigue' ? 2 : 0);
+        this.state[key] = c.classList.contains('selected') ? +c.dataset.v : (key === 'fatigue' ? 2 : key === 'legs_heavy' ? 1 : 0);
         if (id === 'ci-sick') $('#painField').style.display = this.state.sick === 2 ? 'block' : 'none';
       }));
     };
     wire('ci-fatigue', 'fatigue'); wire('ci-legs', 'legs_heavy'); wire('ci-sleep', 'bad_sleep'); wire('ci-sick', 'sick');
     bg.querySelectorAll('#ci-fatigue .chip')[2].classList.add('selected');
+    bg.querySelectorAll('#ci-legs .chip')[1].classList.add('selected');
   },
   async submit() {
     const st = this.state;
     const body = {
       date: this.date,
-      fatigue: st.fatigue, legs_heavy: !!st.legs_heavy, bad_sleep: !!st.bad_sleep,
+      fatigue: st.fatigue, legs_heavy: st.legs_heavy, bad_sleep: !!st.bad_sleep,
       sick: st.sick === 1, pain: st.sick === 2 ? ($('#ci-pain').value || 'molestia') : '',
       available_min: $('#ci-time').value ? +$('#ci-time').value : null,
       note: $('#ci-note').value,
+      wants_session: $('#ci-wants') ? $('#ci-wants').checked : false,
     };
     try {
       const r = await post('/checkin', body);
@@ -414,6 +450,7 @@ async function renderPlan() {
       <button class="primary" onclick="regenPlan()">Regenerar plan</button>
       <button onclick="planNav(28)">Después →</button>
     </div>
+    <button class="ghost small" style="margin-bottom:8px" onclick="methodModal()">${icon('info')} ¿En qué se basa este plan?</button>
     ${weeks.map(ws => weekBlock(ws, byWeek[ws])).join('') || '<div class="list-empty">Sin sesiones. Añade una carrera objetivo primero.</div>'}
   `;
 }
@@ -637,6 +674,11 @@ async function loadNutritionInline() {
         <div><label>Minuto</label><input id="n-min" type="number" placeholder="ej: 40"></div>
       </div>
       <label>Producto</label><input id="n-product" placeholder="ej: Gel Maurten 100">
+      ${(K.gel_presets && K.gel_presets.length) ? `
+      <label class="small muted">O elige uno de la lista (marcas más comunes)</label>
+      <div class="chip-row" id="n-preset">
+        ${K.gel_presets.map((g, i) => `<div class="chip" data-i="${i}">${esc(g.brand)} ${esc(g.product)}</div>`).join('')}
+      </div>` : ''}
       <div class="row">
         <div><label>Carbo (g)</label><input id="n-carbs" type="number"></div>
         <div><label>Sodio (mg)</label><input id="n-sodium" type="number"></div>
@@ -684,12 +726,48 @@ async function loadNutritionInline() {
   `;
 }
 let NUTRITION_TEXT = { carbs: '', sodium: '', gut: '' };
+let K = { method: null, zones: [], gel_presets: [] }; // caché de /knowledge para toda la app
 async function loadKnowledge() {
   try {
     const k = await get('/knowledge');
     NUTRITION_TEXT = { carbs: k.nutrition.carbs.summary, sodium: k.nutrition.sodium.summary, gut: k.nutrition.gut_training.summary };
     window.__STRENGTH_LIB = k.strength_library;
+    K = k;
   } catch {}
+}
+
+// ---------------- Explicaciones (métricas, zonas, metodología) ----------------
+const METRIC_INFO = {
+  forma: { title: 'Forma (CTL)', body: 'Media de tu carga de entrenamiento de los últimos 42 días: tu nivel de fondo acumulado. Sube poco a poco con constancia — no se puede "hacer trampa" entrenando mucho de golpe, porque eso sube la fatiga, no la forma.' },
+  fatiga: { title: 'Fatiga (ATL)', body: 'Media de carga de los últimos 7 días: lo que llevas encima ahora mismo. Sube rápido tras una semana exigente y baja rápido si descansas unos días.' },
+  fresco: { title: 'Frescura (TSB)', body: 'Es Forma − Fatiga. Positivo significa que estás fresco (buen momento para una carrera o una sesión dura). Muy negativo (por debajo de −15/−20) indica riesgo de sobrecarga: toca bajar el ritmo.' },
+};
+function metricModal(which) {
+  const t = METRIC_INFO[which];
+  openModal(`<button class="ghost close-x" onclick="closeModals()">${icon('x')}</button><h2>${t.title}</h2><p>${t.body}</p>
+    <p class="source-note">Modelo TRIMP / Banister — el mismo que usan TrainingPeaks o el "Fitness &amp; Freshness" de Strava.</p>`, { center: true });
+}
+function methodModal() {
+  const m = K.method;
+  if (!m) return;
+  openModal(`<button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+    <h2>¿En qué se basa tu plan?</h2>
+    <p class="muted small">${esc(m.overview)}</p>
+    ${m.items.map(it => `<div class="divider"></div><h3 style="text-transform:none;color:var(--text);font-size:.95rem">${esc(it.title)}</h3>
+      <p class="small">${esc(it.text)}</p><p class="source-note">${esc(it.source)}</p>`).join('')}
+  `, { center: true });
+}
+function zoneModal(zoneCode) {
+  const zones = K.zones && K.zones.length ? K.zones : [];
+  const rows = zoneCode ? zones.filter(z => zoneCode.split('-').includes(z.zone)) : zones;
+  openModal(`<button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+    <h2>Zonas de frecuencia cardiaca</h2>
+    <p class="muted small">Calculadas con la fórmula de Karvonen a partir de tu FC máxima y en reposo (Ajustes).</p>
+    ${rows.map(z => `<div class="zone-row">
+      <div class="z-badge" style="background:${ZCOLOR[z.zone]}">${z.zone}</div>
+      <div class="z-info"><strong>${esc(z.name)}</strong><span class="small muted">${z.bpm[0]}–${z.bpm[1]} ppm</span><p class="small">${esc(z.text)}</p></div>
+    </div>`).join('')}
+  `, { center: true });
 }
 async function saveNutritionLog() {
   const feelChip = $('#n-feeling .chip.selected');
@@ -701,6 +779,14 @@ async function saveNutritionLog() {
   toast('Registrado'); loadNutritionInline();
 }
 document.addEventListener('click', e => { const c = e.target.closest?.('#n-feeling .chip'); if (c) { $$('#n-feeling .chip').forEach(x => x.classList.remove('selected')); c.classList.add('selected'); } });
+document.addEventListener('click', e => {
+  const c = e.target.closest?.('#n-preset .chip');
+  if (!c) return;
+  $$('#n-preset .chip').forEach(x => x.classList.remove('selected')); c.classList.add('selected');
+  const g = K.gel_presets[+c.dataset.i]; if (!g) return;
+  $('#n-product').value = `${g.brand} ${g.product}`;
+  $('#n-carbs').value = g.carbs_g ?? ''; $('#n-sodium').value = g.sodium_mg ?? ''; $('#n-caf').value = g.caffeine_mg ?? '';
+});
 async function delNutritionLog(id) { await del(`/nutrition/${id}`); loadNutritionInline(); }
 
 // =================== HISTORIAL ===================
@@ -720,18 +806,25 @@ async function renderHistorial() {
           <button class="danger" onclick="stravaDisconnect()">Desconectar</button>
         </div>` : `<button class="primary" style="width:100%" onclick="stravaConnect()">Conectar con Strava</button>`}
     </div>
-    <div class="card">
-      <h2>Carreras anteriores</h2>
-      <p class="muted small">Tu historial de retos ayuda a estimar tu ritmo en la próxima carrera.</p>
-      <button style="width:100%" onclick="pastRaceModal()">Añadir carrera pasada</button>
-      ${past.length ? `<table class="simple" style="margin-top:8px">
-        <tr><th>Carrera</th><th>Fecha</th><th>Km</th><th>D+</th><th>Tiempo</th><th></th></tr>
-        ${past.map(p => `<tr>
-          <td>${esc(p.name)}</td><td>${fmtDate(p.date)}</td><td>${p.distance_km ?? '-'}</td>
-          <td>${p.dplus_m ? Math.round(p.dplus_m) : '-'}</td><td>${p.time_min ? hm(p.time_min) : '-'}</td>
-          <td><button class="ghost" onclick="delPastRace(${p.id})">${icon('trash')}</button></td>
-        </tr>`).join('')}
-      </table>` : '<p class="list-empty">Sin carreras registradas aún.</p>'}
+    <div class="card tight" style="cursor:pointer" onclick="togglePastRaces()">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>Carreras anteriores${strava.connected ? ` <span class="small muted">(${past.length})</span>` : ''}</strong>
+        ${icon('flag')}
+      </div>
+    </div>
+    <div id="pastRacesBox" style="display:${strava.connected ? 'none' : 'block'}">
+      <div class="card">
+        <p class="muted small">Tu historial de retos ayuda a estimar tu ritmo en la próxima carrera.</p>
+        <button style="width:100%" onclick="pastRaceModal()">Añadir carrera pasada</button>
+        ${past.length ? `<table class="simple" style="margin-top:8px">
+          <tr><th>Carrera</th><th>Fecha</th><th>Km</th><th>D+</th><th>Tiempo</th><th></th></tr>
+          ${past.map(p => `<tr>
+            <td>${esc(p.name)}</td><td>${fmtDate(p.date)}</td><td>${p.distance_km ?? '-'}</td>
+            <td>${p.dplus_m ? Math.round(p.dplus_m) : '-'}</td><td>${p.time_min ? hm(p.time_min) : '-'}</td>
+            <td><button class="ghost" onclick="delPastRace(${p.id})">${icon('trash')}</button></td>
+          </tr>`).join('')}
+        </table>` : '<p class="list-empty">Sin carreras registradas aún.</p>'}
+      </div>
     </div>
     <div class="card">
       <h2>Actividades recientes</h2>
@@ -740,16 +833,79 @@ async function renderHistorial() {
   `;
   get('/activities?' + new URLSearchParams({ from: addDays(todayStr(), -30), to: todayStr() }))
     .then(acts => {
-      $('#recentActs').innerHTML = acts.length ? `<table class="simple">
-        <tr><th>Fecha</th><th>Actividad</th><th>Km</th><th>D+</th><th>Carga</th></tr>
-        ${acts.slice(0, 20).map(a => `<tr><td>${fmtDate(a.date)}</td><td>${esc(a.name || a.sport_type)}</td>
-          <td>${a.distance_m ? (a.distance_m / 1000).toFixed(1) : '-'}</td><td>${a.elevation_gain_m ? Math.round(a.elevation_gain_m) : '-'}</td>
-          <td>${Math.round(a.load || 0)}</td></tr>`).join('')}
-      </table>` : '<p>Sin actividades sincronizadas todavía.</p>';
+      $('#recentActs').innerHTML = acts.length ? acts.slice(0, 20).map(a => {
+        const km = a.distance_m ? a.distance_m / 1000 : 0;
+        const paceMinKm = km > 0.3 && a.moving_time_s ? (a.moving_time_s / 60 / km) : null;
+        return `<div class="session" style="padding:10px 0">
+          <div class="head"><div><strong class="stype">${icon(TYPE_ICON[a.sport_type?.toLowerCase()] || 'wave')} ${esc(a.name || a.sport_type)}</strong></div>
+          <div class="small muted">${fmtDate(a.date)}</div></div>
+          <div class="meta">
+            ${km ? `<span>${km.toFixed(1)} km</span>` : ''}
+            ${a.elevation_gain_m ? `<span>${Math.round(a.elevation_gain_m)} m D+</span>` : ''}
+            ${a.moving_time_s ? `<span>${hm(Math.round(a.moving_time_s / 60))}</span>` : ''}
+            ${paceMinKm ? `<span>${paceMinKm.toFixed(1)} min/km</span>` : ''}
+            ${a.avg_hr ? `<span>${Math.round(a.avg_hr)} ppm avg</span>` : ''}
+            ${a.max_hr ? `<span>${Math.round(a.max_hr)} ppm max</span>` : ''}
+            <span>${Math.round(a.load || 0)} carga</span>
+          </div>
+        </div>`;
+      }).join('') : '<p>Sin actividades sincronizadas todavía.</p>';
     });
 }
+function togglePastRaces() { const b = $('#pastRacesBox'); b.style.display = b.style.display === 'none' ? 'block' : 'none'; }
 async function stravaConnect() { const { url } = await get('/strava/connect'); window.open(url, '_blank'); }
-async function stravaSync(full) { toast('Sincronizando…'); const r = await post('/strava/sync', { full }); toast(`${r.imported} actividades importadas`); renderHistorial(); }
+async function stravaSync(full) {
+  toast('Sincronizando…');
+  const r = await post('/strava/sync', { full });
+  toast(`${r.imported} actividades importadas`);
+  renderHistorial();
+  if (r.unlogged_nutrition && r.unlogged_nutrition.length) postSyncNutritionPrompt(r.unlogged_nutrition);
+}
+// Tras sincronizar, pregunta qué se tomó en las actividades nuevas relevantes (>15 min) sin registro todavía.
+function postSyncNutritionPrompt(items) {
+  let i = 0;
+  const askNext = () => {
+    if (i >= items.length) { closeModals(); return; }
+    const a = items[i];
+    openModal(`
+      <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+      <h2>¿Qué tomaste en "${esc(a.name)}"?</h2>
+      <p class="muted small">${fmtDate(a.date)} · ${hm(Math.round((a.moving_time_s || 0) / 60))}</p>
+      ${(K.gel_presets && K.gel_presets.length) ? `
+      <div class="chip-row" id="psn-preset">
+        ${K.gel_presets.map((g, gi) => `<div class="chip" data-i="${gi}">${esc(g.brand)} ${esc(g.product)}</div>`).join('')}
+      </div>` : ''}
+      <label>Producto</label><input id="psn-product" placeholder="ej: Gel Maurten 100">
+      <div class="row">
+        <div><label>Carbo (g)</label><input id="psn-carbs" type="number"></div>
+        <div><label>Sodio (mg)</label><input id="psn-sodium" type="number"></div>
+      </div>
+      <label>¿Cómo te sentó?</label>
+      <div class="chip-row" id="psn-feeling"><div class="chip" data-v="bien">Bien</div><div class="chip" data-v="neutro">Neutro</div><div class="chip" data-v="mal">Mal</div></div>
+      <div class="row" style="margin-top:12px">
+        <button onclick="_postSyncSkip()">No tomé nada</button>
+        <button class="primary" onclick="_postSyncSave()">Guardar</button>
+      </div>
+    `, { center: true });
+    $$('#psn-preset .chip').forEach(c => c.addEventListener('click', () => {
+      const g = K.gel_presets[+c.dataset.i];
+      $('#psn-product').value = `${g.brand} ${g.product}`; $('#psn-carbs').value = g.carbs_g ?? ''; $('#psn-sodium').value = g.sodium_mg ?? '';
+    }));
+  };
+  window._postSyncSkip = () => { i++; askNext(); };
+  window._postSyncSave = async () => {
+    const a = items[i];
+    const feelChip = $('#psn-feeling .chip.selected');
+    if ($('#psn-product').value) {
+      await post('/nutrition', {
+        date: a.date, product: $('#psn-product').value, carbs_g: +$('#psn-carbs').value || null,
+        sodium_mg: +$('#psn-sodium').value || null, feeling: feelChip ? feelChip.dataset.v : null,
+      });
+    }
+    i++; askNext();
+  };
+  askNext();
+}
 async function stravaDisconnect() { if (!confirm('¿Desconectar Strava?')) return; await post('/strava/disconnect'); renderHistorial(); }
 function pastRaceModal() {
   openModal(`
@@ -778,7 +934,16 @@ async function renderAnalisis() {
   el.innerHTML = `<div class="list-empty">Cargando…</div>`;
   const from = addDays(todayStr(), -120), to = addDays(todayStr(), 21);
   const series = await get(`/fitness?from=${from}&to=${to}`);
-  el.innerHTML = `<h1>Análisis</h1><div class="card">${fitnessChart(series)}</div>
+  const todaySeries = series.find(s => s.date === todayStr()) || series[series.length - 1];
+  el.innerHTML = `<h1>Análisis</h1>
+    <div class="card">
+      ${todaySeries ? `<div class="stat-grid tight" style="margin-bottom:6px">
+        <div class="stat" style="cursor:pointer" onclick="metricModal('forma')"><div class="v">${Math.round(todaySeries.ctl)}</div><div class="l">Forma</div></div>
+        <div class="stat" style="cursor:pointer" onclick="metricModal('fatiga')"><div class="v">${Math.round(todaySeries.atl)}</div><div class="l">Fatiga</div></div>
+        <div class="stat" style="cursor:pointer" onclick="metricModal('fresco')"><div class="v">${todaySeries.tsb > 0 ? '+' : ''}${Math.round(todaySeries.tsb)}</div><div class="l">Frescura</div></div>
+      </div>` : ''}
+      ${fitnessChart(series)}
+    </div>
     <div class="card">
       <h3>Cómo leerlo</h3>
       <p class="small muted"><span style="color:var(--accent)">Forma (CTL)</span>: tu nivel de entrenamiento acumulado (media de 42 días).
@@ -816,21 +981,26 @@ async function renderAjustes() {
   const [s, k, me] = await Promise.all([get('/settings'), get('/knowledge'), get('/me')]);
   const lib = k.strength_library;
   const theme = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  const initials = (s.athlete_name || me.email || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || '?';
   el.innerHTML = `
     <h1>Perfil y ajustes</h1>
     <div class="card">
-      <h2>Corredor</h2>
-      <label>Nombre</label><input id="s-name" value="${esc(s.athlete_name || '')}" placeholder="Tu nombre">
-      <label>Apariencia</label>
-      <div class="theme-toggle">
-        <button type="button" data-theme="dark" class="${theme === 'dark' ? 'active' : ''}" onclick="setTheme('dark')">${icon('moon')} Noche</button>
-        <button type="button" data-theme="light" class="${theme === 'light' ? 'active' : ''}" onclick="setTheme('light')">${icon('sun')} Día</button>
+      <div class="profile-head">
+        <div class="avatar-circle" onclick="toggleTheme()" title="Cambiar tema (día/noche)">${esc(initials)}<span class="avatar-theme-dot">${icon(theme === 'dark' ? 'moon' : 'sun')}</span></div>
+        <div style="flex:1"><label>Nombre</label><input id="s-name" value="${esc(s.athlete_name || '')}" placeholder="Tu nombre"></div>
       </div>
+      <p class="small muted" style="margin-top:4px">Toca tu avatar para cambiar entre tema día/noche.</p>
     </div>
     <div class="card">
       <h2>Disponibilidad semanal</h2>
       <p class="muted small">Minutos que puedes dedicar cada día (0 = descanso fijo).</p>
-      ${DIAS.map((d, i) => `<label>${d}</label><input type="number" class="avail" data-i="${i}" value="${s.availability[i]}">`).join('')}
+      <div class="avail-grid">
+        ${DIAS.map((d, i) => `<div class="avail-day">
+          <div class="avail-day-label">${d.slice(0, 3)}</div>
+          <input type="number" class="avail" data-i="${i}" value="${s.availability[i]}" min="0" step="5">
+          <div class="avail-day-unit">min</div>
+        </div>`).join('')}
+      </div>
       <label>Horas máximas por semana</label><input id="s-maxh" type="number" value="${s.max_week_hours}">
     </div>
     <div class="card">
@@ -883,6 +1053,10 @@ function setTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   try { localStorage.setItem('tc_theme', t); } catch {}
   if (currentTab === 'ajustes') renderAjustes();
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  setTheme(cur === 'dark' ? 'light' : 'dark');
 }
 
 // ---------------- Onboarding (tras registrarte: datos + objetivo) ----------------

@@ -53,6 +53,29 @@ label { display: block; font-size: .82rem; color: var(--muted); margin: .6em 0 .
 .theme-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
 .theme-toggle button { border: none; border-radius: 0; background: transparent; padding: .5em 1em; display: flex; align-items: center; gap: .4em; }
 .theme-toggle button.active { background: var(--accent); color: #0e1512; font-weight: 700; }
+
+/* Perfil: avatar + toggle de tema */
+.profile-head { display: flex; align-items: center; gap: 14px; }
+.avatar-circle {
+  position: relative; flex: 0 0 auto; width: 56px; height: 56px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0e1512;
+  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.15rem;
+  cursor: pointer; user-select: none;
+}
+.avatar-theme-dot {
+  position: absolute; bottom: -3px; right: -3px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--panel); border: 2px solid var(--bg); display: flex; align-items: center; justify-content: center;
+}
+.avatar-theme-dot svg { width: 12px; height: 12px; color: var(--text); }
+
+/* Disponibilidad semanal: grid visual en vez de lista apilada */
+.avail-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0 14px; }
+.avail-day { display: flex; flex-direction: column; align-items: center; gap: 2px; background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 8px 4px; }
+.avail-day-label { font-size: .72rem; font-weight: 700; text-transform: uppercase; color: var(--muted); letter-spacing: .03em; }
+.avail-day input.avail { width: 100%; text-align: center; padding: .3em 0; margin: 2px 0 0; background: transparent; border: none; font-size: 1rem; font-weight: 700; -moz-appearance: textfield; }
+.avail-day input.avail::-webkit-outer-spin-button, .avail-day input.avail::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.avail-day-unit { font-size: .68rem; color: var(--muted); }
+@media (min-width: 480px) { .avail-grid { grid-template-columns: repeat(7, 1fr); } }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
 .card.tight { padding: 10px 12px; }
 .muted { color: var(--muted); }
@@ -159,3 +182,10 @@ table.simple td, table.simple th { padding: 6px 4px; border-bottom: 1px solid va
 .nutri-row:last-child { border-bottom: none; }
 .feeling-bien { color: var(--accent); } .feeling-neutro { color: var(--muted); } .feeling-mal { color: var(--danger); }
 .source-note { font-size: .74rem; color: var(--muted); margin-top: 8px; font-style: italic; }
+
+/* Zonas de frecuencia cardiaca (modal) */
+.zone-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.zone-row:last-child { border-bottom: none; }
+.z-badge { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #0e1512; font-size: .85rem; }
+.z-info { display: flex; flex-direction: column; gap: 2px; }
+.z-info strong { font-size: .92rem; }
