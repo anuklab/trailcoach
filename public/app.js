@@ -83,7 +83,9 @@ const Auth = {
     const name = $('#signupName').value.trim();
     const email = $('#signupEmail').value.trim();
     const password = $('#signupPass').value;
+    const password2 = $('#signupPass2').value;
     $('#signupErr').textContent = '';
+    if (password !== password2) { $('#signupErr').textContent = 'Las contraseñas no coinciden.'; return; }
     try {
       const r = await fetch('/api/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, email, password }) });
       const d = await r.json();
@@ -883,16 +885,136 @@ function setTheme(t) {
   if (currentTab === 'ajustes') renderAjustes();
 }
 
+// ---------------- Onboarding (tras registrarte: datos + objetivo) ----------------
+const Onboarding = {
+  step: 0,
+  data: {
+    name: '', last_name: '', birth_date: '', weight_kg: '', height_cm: '',
+    availability: [0, 75, 75, 90, 60, 240, 150], max_week_hours: 14,
+    race_name: '', race_date: '', race_distance_km: '', race_dplus_m: '', race_target_h: '',
+  },
+  start(name) {
+    this.step = 0;
+    this.data.name = name || '';
+    $('#login').style.display = 'none'; $('#app').style.display = 'none'; $('#onboarding').style.display = 'flex';
+    this.render();
+  },
+  steps: ['perfil', 'disponibilidad', 'objetivo'],
+  render() {
+    const n = this.steps.length;
+    $('#onbProgress').innerHTML = this.steps.map((_, i) =>
+      `<div class="dot ${i === this.step ? 'active' : i < this.step ? 'done' : ''}"></div>`).join('');
+    const fns = { perfil: this.renderPerfil, disponibilidad: this.renderDisponibilidad, objetivo: this.renderObjetivo };
+    $('#onbContent').innerHTML = fns[this.steps[this.step]].call(this);
+  },
+  renderPerfil() {
+    const d = this.data;
+    return `
+      <div class="onb-step">
+        <h2>Cuéntanos sobre ti</h2>
+        <p class="muted small onb-sub">Nos ayuda a calcular tu plan y tu carga de entrenamiento.</p>
+        <label>Nombre</label><input id="onb-name" value="${esc(d.name)}">
+        <label>Apellidos</label><input id="onb-lastname" value="${esc(d.last_name)}">
+        <label>Fecha de nacimiento</label><input id="onb-birth" type="date" value="${d.birth_date || ''}">
+        <div class="row">
+          <div><label>Peso actual (kg)</label><input id="onb-weight" type="number" value="${d.weight_kg}"></div>
+          <div><label>Altura (cm)</label><input id="onb-height" type="number" value="${d.height_cm}"></div>
+        </div>
+      </div>
+      <div class="onb-actions"><button class="primary" style="width:100%" onclick="Onboarding.next()">Siguiente</button></div>
+    `;
+  },
+  renderDisponibilidad() {
+    const d = this.data;
+    return `
+      <div class="onb-step">
+        <h2>Tu disponibilidad</h2>
+        <p class="muted small onb-sub">Es orientativo: podrás cambiarlo cuando quieras desde Ajustes. Minutos que puedes dedicar cada día (0 = descanso fijo).</p>
+        ${DIAS.map((day, i) => `<label>${day}</label><input type="number" class="onb-avail" data-i="${i}" value="${d.availability[i]}">`).join('')}
+        <label>Horas máximas por semana</label><input id="onb-maxh" type="number" value="${d.max_week_hours}">
+      </div>
+      <div class="onb-actions">
+        <button onclick="Onboarding.back()">Atrás</button>
+        <button class="primary" onclick="Onboarding.next()">Siguiente</button>
+      </div>
+    `;
+  },
+  renderObjetivo() {
+    const d = this.data;
+    return `
+      <div class="onb-step">
+        <h2>Tu objetivo</h2>
+        <p class="muted small onb-sub">¿Qué carrera quieres preparar? Puedes dejarlo en blanco y añadirlo luego desde Plan → Carreras.</p>
+        <label>Nombre de la carrera</label><input id="onb-rname" value="${esc(d.race_name)}" placeholder="ej: CDH 110K - Val d'Aran by UTMB">
+        <label>Fecha</label><input id="onb-rdate" type="date" value="${d.race_date}">
+        <div class="row">
+          <div><label>Distancia (km)</label><input id="onb-rdist" type="number" value="${d.race_distance_km}"></div>
+          <div><label>D+ (m)</label><input id="onb-rdplus" type="number" value="${d.race_dplus_m}"></div>
+        </div>
+        <label>Tu objetivo de tiempo (horas, opcional)</label><input id="onb-rtarget" type="number" step="0.1" value="${d.race_target_h}" placeholder="ej: 22">
+      </div>
+      <div class="onb-actions">
+        <button onclick="Onboarding.back()">Atrás</button>
+        <button class="primary" onclick="Onboarding.finish()">Terminar</button>
+      </div>
+    `;
+  },
+  collect() {
+    const d = this.data, step = this.steps[this.step];
+    if (step === 'perfil') {
+      d.name = $('#onb-name').value.trim(); d.last_name = $('#onb-lastname').value.trim();
+      d.birth_date = $('#onb-birth').value || null; d.weight_kg = $('#onb-weight').value; d.height_cm = $('#onb-height').value;
+    } else if (step === 'disponibilidad') {
+      d.availability = $$('.onb-avail').map(i => +i.value || 0); d.max_week_hours = $('#onb-maxh').value;
+    } else if (step === 'objetivo') {
+      d.race_name = $('#onb-rname').value.trim(); d.race_date = $('#onb-rdate').value;
+      d.race_distance_km = $('#onb-rdist').value; d.race_dplus_m = $('#onb-rdplus').value; d.race_target_h = $('#onb-rtarget').value;
+    }
+  },
+  next() { this.collect(); this.step++; this.render(); },
+  back() { this.collect(); this.step--; this.render(); },
+  async finish() {
+    this.collect();
+    const d = this.data;
+    const btn = event.target; btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      await put('/settings', {
+        athlete_name: d.name, last_name: d.last_name, birth_date: d.birth_date || null,
+        weight_kg: +d.weight_kg || 70, height_cm: d.height_cm ? +d.height_cm : null,
+        availability: d.availability, max_week_hours: +d.max_week_hours || 14,
+        onboarding_done: true,
+      });
+      if (d.race_name && d.race_date) {
+        await post('/races', {
+          name: d.race_name, date: d.race_date, priority: 'A',
+          distance_km: d.race_distance_km ? +d.race_distance_km : null,
+          dplus_m: d.race_dplus_m ? +d.race_dplus_m : null,
+          target_time_h: d.race_target_h ? +d.race_target_h : null,
+        });
+        try { await post('/plan/generate', {}); } catch {}
+      }
+      enterApp();
+    } catch (e) { toast('Error: ' + e.message); btn.disabled = false; btn.textContent = 'Terminar'; }
+  },
+};
+
 // ---------------- Boot ----------------
-function showLogin() { $('#login').style.display = 'flex'; $('#app').style.display = 'none'; }
-async function boot() {
-  if (!Auth.token) { showLogin(); return; }
-  try { await get('/me'); }
-  catch (e) { showLogin(); return; }
-  $('#login').style.display = 'none'; $('#app').style.display = 'block';
+function showLogin() { $('#login').style.display = 'flex'; $('#app').style.display = 'none'; $('#onboarding').style.display = 'none'; }
+function enterApp() {
+  $('#login').style.display = 'none'; $('#onboarding').style.display = 'none'; $('#app').style.display = 'block';
   loadKnowledge();
   switchTab('hoy');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+async function boot() {
+  if (!Auth.token) { showLogin(); return; }
+  let me;
+  try { me = await get('/me'); }
+  catch (e) { showLogin(); return; }
+  let s = null;
+  try { s = await get('/settings'); } catch {}
+  if (s && !s.onboarding_done) { Onboarding.start(me.name || s.athlete_name || ''); return; }
+  enterApp();
 }
 $('#loginPass')?.addEventListener('keydown', e => { if (e.key === 'Enter') Auth.login(); });
 $('#signupPass')?.addEventListener('keydown', e => { if (e.key === 'Enter') Auth.signup(); });

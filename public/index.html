@@ -42,9 +42,19 @@
       <input id="signupEmail" type="email" autocomplete="username">
       <label>Contraseña</label>
       <input id="signupPass" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres">
+      <label>Repite la contraseña</label>
+      <input id="signupPass2" type="password" autocomplete="new-password" placeholder="Repite la contraseña">
       <p id="signupErr" class="small" style="color:var(--danger)"></p>
       <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.signup()">Crear cuenta</button>
     </div>
+  </div>
+</div>
+
+<div id="onboarding" class="login-wrap" style="display:none">
+  <div class="login-box card onboarding-box">
+    <div class="brand brand-center" style="margin-bottom:10px"><img src="/icons/logo-mark-128.png" alt="TrailCoach"></div>
+    <div class="onb-progress" id="onbProgress"></div>
+    <div id="onbContent"></div>
   </div>
 </div>
 

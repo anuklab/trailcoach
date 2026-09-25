@@ -94,6 +94,17 @@ label { display: block; font-size: .82rem; color: var(--muted); margin: .6em 0 .
 .auth-tabs { display: flex; gap: 4px; background: var(--panel2); border-radius: 999px; padding: 3px; margin-bottom: 16px; }
 .auth-tabs button { flex: 1; border: none; background: transparent; padding: .55em 0; border-radius: 999px; font-weight: 600; font-size: .88rem; color: var(--muted); cursor: pointer; }
 .auth-tabs button.active { background: var(--accent); color: #0e1512; }
+.onboarding-box { max-width: 420px; }
+.onb-progress { display: flex; justify-content: center; gap: 6px; margin-bottom: 16px; }
+.onb-progress .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); transition: background .15s; }
+.onb-progress .dot.active { background: var(--accent); }
+.onb-progress .dot.done { background: var(--accent-dim); }
+.onb-step h2 { margin-bottom: 2px; }
+.onb-step .onb-sub { margin-top: 0; margin-bottom: 14px; }
+.onb-actions { display: flex; gap: .6em; margin-top: 16px; }
+.onb-actions button { flex: 1; }
+.onb-skip { text-align: center; margin-top: 10px; }
+.onb-skip button { background: transparent; border-color: transparent; color: var(--muted); font-size: .82rem; }
 .ask-coach .chip-row { margin-bottom: 8px; }
 .divider { height: 1px; background: var(--border); margin: 14px 0; }
 .raceline { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }

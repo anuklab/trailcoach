@@ -189,7 +189,11 @@ export const DEFAULT_SETTINGS = {
   poles: true,
   plan_start: null,     // si null, hoy
   athlete_name: '',
+  last_name: '',
+  birth_date: null,
+  height_cm: null,
   weight_kg: 70,
+  onboarding_done: false, // controla si se ha completado el asistente inicial (datos + objetivo)
 };
 
 // Los ajustes viven por usuario, en users.settings (JSON), fusionados con los valores por defecto.
