@@ -18,6 +18,7 @@ Tu entrenador personal de ultra trail running. Web app privada (funciona como ap
 - Estima tu **VO2max aproximado** a partir de tu mejor esfuerzo llano reciente (fórmulas de Jack Daniels y Jimmy Gilbert, las mismas detrás de las tablas VDOT).
 - Foto de perfil real (no un icono), y funciona correctamente como PWA instalada en el móvil (el service worker se actualiza solo, sin tener que reinstalar la app a mano).
 - Guardas tu **historial de carreras pasadas**, que se usa para estimar tu ritmo en la próxima.
+- **Recuperación de contraseña** por email y **borrado de cuenta** (con todos sus datos) desde Ajustes → Cuenta, para cumplir con el derecho a la supresión de datos.
 
 Las recomendaciones de nutrición, fuerza y metodología están basadas en guías con evidencia (citadas dentro de la propia app, en Nutrición, en Ajustes → fuerza, y en Análisis → "¿En qué se basa?").
 
@@ -84,6 +85,40 @@ Las reglas fijas del check-in (cansado / piernas pesadas / poco tiempo / enfermo
 
 El coste de uso personal (unos pocos mensajes al día, por usuario) suele ser de céntimos al mes.
 
+## Activar la recuperación de contraseña por email (necesario antes de tener usuarios reales)
+
+Sin esto configurado, "¿Olvidaste tu contraseña?" genera el enlace de recuperación pero **solo queda escrito en el
+log del servidor** — no le llega el correo a nadie. Para que funcione de verdad:
+
+1. Consigue credenciales SMTP de cualquier proveedor (Resend, Brevo, Amazon SES, o tu propio Gmail con una
+   [contraseña de aplicación](https://myaccount.google.com/apppasswords)).
+2. Rellena en tu `.env`: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
+3. Reinicia (`docker compose up -d`).
+
+## Antes de vender esto a otras personas
+
+La app es funcionalmente sólida, pero "funciona bien" y "listo para cobrar por ello" no son lo mismo. Antes de
+lanzarlo como producto de pago, revisa esto:
+
+- [ ] **Pide a Strava aprobación como app multiusuario.** Su API limita cuántos atletas puede tener conectados una
+  app sin revisar ("single-player"); pasado ese límite hay que solicitar aprobación en
+  [strava.com/settings/api](https://www.strava.com/settings/api), que puede tardar. Pídelo con tiempo, antes de
+  tener usuarios de pago esperando.
+- [ ] **Configura SMTP** (ver arriba) — sin esto, nadie puede recuperar su contraseña.
+- [ ] **Rellena `public/privacy.html` y `public/terms.html`** con tus datos reales (están marcados con
+  `[TU NOMBRE/EMAIL]`) y haz que un abogado las revise, sobre todo por tratarse de datos de salud/actividad física
+  bajo RGPD si vas a operar en la UE.
+- [ ] **Añade una pasarela de pago** (Stripe, etc.) — de momento no hay cobro integrado.
+- [ ] **Backups automáticos de la base de datos.** Es un único archivo SQLite en un volumen; si el disco falla,
+  se pierde todo. Automatiza una copia periódica (por ejemplo, `sqlite3 .backup` a almacenamiento externo tipo S3/
+  Backblaze).
+- [ ] **Prueba el registro/login/recuperación de contraseña en dispositivos reales** (iOS y Android), no solo en el
+  navegador de escritorio.
+
+Ya están cubiertos: cuentas por usuario con contraseña con hash, límite de intentos de login/registro (protección
+básica contra fuerza bruta), recuperación de contraseña (con SMTP configurado) y borrado de cuenta con todos sus
+datos (derecho a la supresión).
+
 ## Estructura del proyecto
 
 ```
@@ -104,6 +139,7 @@ server/
   adherence.js  Estado de "vas en camino" a partir del cumplimiento reciente del plan
   strava.js     Integración con Strava (por usuario) y sincronización automática en segundo plano
   claude.js     Cliente de la API de Claude para ajustes en lenguaje natural
+  mailer.js     Envío de correo (recuperación de contraseña) vía SMTP
 public/       Frontend (PWA en JavaScript puro, sin frameworks)
 ```
 

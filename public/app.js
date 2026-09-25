@@ -64,8 +64,36 @@ const Auth = {
   showTab(which) {
     $('#authTabLogin').classList.toggle('active', which === 'login');
     $('#authTabSignup').classList.toggle('active', which === 'signup');
+    $('#authTabs').style.display = which === 'reset' ? 'none' : '';
     $('#authFormLogin').style.display = which === 'login' ? 'block' : 'none';
     $('#authFormSignup').style.display = which === 'signup' ? 'block' : 'none';
+    $('#authFormForgot').style.display = which === 'forgot' ? 'block' : 'none';
+    $('#authFormReset').style.display = which === 'reset' ? 'block' : 'none';
+  },
+  async forgotPassword() {
+    const email = $('#forgotEmail').value.trim();
+    $('#forgotErr').textContent = ''; $('#forgotOk').style.display = 'none';
+    try {
+      const r = await fetch('/api/password/forgot', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) });
+      const d = await r.json();
+      if (!r.ok) { $('#forgotErr').textContent = d.error || 'Error'; return; }
+      $('#forgotOk').textContent = d.message; $('#forgotOk').style.display = 'block';
+    } catch (e) { $('#forgotErr').textContent = 'No se pudo conectar con el servidor.'; }
+  },
+  async resetPassword() {
+    const password = $('#resetPass').value;
+    $('#resetErr').textContent = '';
+    const params = new URLSearchParams(location.search);
+    const token = params.get('reset');
+    try {
+      const r = await fetch('/api/password/reset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, password }) });
+      const d = await r.json();
+      if (!r.ok) { $('#resetErr').textContent = d.error || 'Error'; return; }
+      Auth.token = d.token; localStorage.setItem('tc_token', d.token);
+      history.replaceState(null, '', location.pathname);
+      toast('Contraseña actualizada');
+      boot();
+    } catch (e) { $('#resetErr').textContent = 'No se pudo conectar con el servidor.'; }
   },
   async login() {
     const email = $('#loginEmail').value.trim();
@@ -1077,12 +1105,41 @@ async function renderAjustes() {
       <h2>Cuenta</h2>
       <p class="small muted">Conectado como <strong>${esc(me.email)}</strong></p>
       <button class="danger" style="width:100%;margin-top:6px" onclick="logout()">Cerrar sesión</button>
+      <button class="ghost" style="width:100%;margin-top:8px;color:var(--danger)" onclick="deleteAccountModal()">Eliminar mi cuenta</button>
     </div>
-    <p class="small muted" style="text-align:center;margin-top:14px">TrailCoach · datos guardados en tu propio servidor</p>
+    <p class="small muted" style="text-align:center;margin-top:14px">
+      TrailCoach · datos guardados en tu propio servidor ·
+      <a href="/terms.html" target="_blank">Términos</a> · <a href="/privacy.html" target="_blank">Privacidad</a>
+    </p>
   `;
   $$('#s-strengthmode .chip').forEach(c => c.addEventListener('click', () => {
     $$('#s-strengthmode .chip').forEach(x => x.classList.remove('selected')); c.classList.add('selected');
   }));
+}
+function deleteAccountModal() {
+  openModal(`
+    <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+    <h2>Eliminar mi cuenta</h2>
+    <p class="small muted">Esto borra tu cuenta y todos tus datos (carreras, plan, historial de actividades, nutrición) de forma permanente. No se puede deshacer.</p>
+    <label>Escribe tu contraseña para confirmar</label>
+    <input id="delAccPass" type="password" autocomplete="current-password">
+    <p id="delAccErr" class="small" style="color:var(--danger)"></p>
+    <div class="row" style="margin-top:12px">
+      <button onclick="closeModals()">Cancelar</button>
+      <button class="danger" onclick="confirmDeleteAccount()">Eliminar definitivamente</button>
+    </div>
+  `, { center: true });
+}
+async function confirmDeleteAccount() {
+  const password = $('#delAccPass').value;
+  $('#delAccErr').textContent = '';
+  try {
+    await api('/account', { method: 'DELETE', body: JSON.stringify({ password }) });
+    closeModals();
+    Auth.token = null; localStorage.removeItem('tc_token');
+    showLogin();
+    toast('Tu cuenta se ha eliminado.');
+  } catch (e) { $('#delAccErr').textContent = e.message || 'Error'; }
 }
 async function saveSettings() {
   const availability = $$('.avail').map(i => +i.value || 0);
@@ -1260,7 +1317,10 @@ const Onboarding = {
 };
 
 // ---------------- Boot ----------------
-function showLogin() { $('#login').style.display = 'flex'; $('#app').style.display = 'none'; $('#onboarding').style.display = 'none'; }
+function showLogin() {
+  $('#login').style.display = 'flex'; $('#app').style.display = 'none'; $('#onboarding').style.display = 'none';
+  if (new URLSearchParams(location.search).get('reset')) Auth.showTab('reset');
+}
 function enterApp() {
   $('#login').style.display = 'none'; $('#onboarding').style.display = 'none'; $('#app').style.display = 'block';
   loadKnowledge();

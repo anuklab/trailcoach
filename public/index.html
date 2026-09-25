@@ -23,7 +23,7 @@
 <div id="login" class="login-wrap" style="display:none">
   <div class="login-box card">
     <div class="brand brand-center" style="margin-bottom:10px"><img src="/icons/logo-mark-128.png" alt="TrailCoach"></div>
-    <div class="auth-tabs">
+    <div class="auth-tabs" id="authTabs">
       <button type="button" id="authTabLogin" class="active" onclick="Auth.showTab('login')">Entrar</button>
       <button type="button" id="authTabSignup" onclick="Auth.showTab('signup')">Crear cuenta</button>
     </div>
@@ -34,6 +34,7 @@
       <input id="loginPass" type="password" autocomplete="current-password">
       <p id="loginErr" class="small" style="color:var(--danger)"></p>
       <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.login()">Entrar</button>
+      <p class="small" style="text-align:center;margin-top:10px"><a href="#" onclick="Auth.showTab('forgot');return false">¿Olvidaste tu contraseña?</a></p>
     </div>
     <div id="authFormSignup" style="display:none">
       <label>Nombre</label>
@@ -47,6 +48,25 @@
       <p id="signupErr" class="small" style="color:var(--danger)"></p>
       <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.signup()">Crear cuenta</button>
     </div>
+    <div id="authFormForgot" style="display:none">
+      <p class="small muted">Te mandamos un enlace a tu email para elegir una contraseña nueva.</p>
+      <label>Email</label>
+      <input id="forgotEmail" type="email" autocomplete="username">
+      <p id="forgotErr" class="small" style="color:var(--danger)"></p>
+      <p id="forgotOk" class="small" style="color:var(--accent);display:none"></p>
+      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.forgotPassword()">Enviar enlace</button>
+      <p class="small" style="text-align:center;margin-top:10px"><a href="#" onclick="Auth.showTab('login');return false">Volver a entrar</a></p>
+    </div>
+    <div id="authFormReset" style="display:none">
+      <p class="small muted">Elige tu nueva contraseña.</p>
+      <label>Contraseña nueva</label>
+      <input id="resetPass" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres">
+      <p id="resetErr" class="small" style="color:var(--danger)"></p>
+      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.resetPassword()">Guardar contraseña</button>
+    </div>
+    <p class="small muted" style="text-align:center;margin-top:16px">
+      <a href="/terms.html" target="_blank">Términos de uso</a> · <a href="/privacy.html" target="_blank">Privacidad</a>
+    </p>
   </div>
 </div>
 

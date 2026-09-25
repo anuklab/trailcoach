@@ -120,6 +120,16 @@ CREATE TABLE IF NOT EXISTS nutrition_logs (
   notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Recuperación de contraseña: token de un solo uso con caducidad, nunca se guarda en claro.
+CREATE TABLE IF NOT EXISTS password_resets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 `);
 
 // Migraciones ligeras: añade columnas nuevas si la base de datos ya existía sin ellas
@@ -153,6 +163,7 @@ CREATE INDEX IF NOT EXISTS idx_sess_user_date ON sessions(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_checkins_user_date ON checkins(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_changelog_user ON changelog(user_id);
 CREATE INDEX IF NOT EXISTS idx_nutri_user_date ON nutrition_logs(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_resets(token_hash);
 `);
 
 // ---------- Autenticación ----------
@@ -180,6 +191,32 @@ export function getUserByEmail(email) {
 }
 export function getUserById(id) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+}
+export function setPassword(userId, password) {
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), userId);
+}
+export function deleteUser(userId) {
+  // Las claves foráneas con ON DELETE CASCADE se llevan por delante carreras, actividades,
+  // sesiones, check-ins, nutrición y tokens de recuperación de este usuario.
+  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+}
+
+// ---------- Recuperación de contraseña ----------
+// El token en claro solo existe en memoria/email; en la base de datos solo se guarda su hash
+// (sha256 basta aquí: es un valor aleatorio de un solo uso con caducidad corta, no una contraseña).
+export function createPasswordReset(userId) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hora
+  db.prepare('INSERT INTO password_resets(user_id, token_hash, expires_at) VALUES (?,?,?)').run(userId, tokenHash, expiresAt);
+  return token;
+}
+export function consumePasswordReset(token) {
+  const tokenHash = crypto.createHash('sha256').update(String(token || '')).digest('hex');
+  const row = db.prepare('SELECT * FROM password_resets WHERE token_hash = ? AND used = 0').get(tokenHash);
+  if (!row || row.expires_at < new Date().toISOString()) return null;
+  db.prepare('UPDATE password_resets SET used = 1 WHERE id = ?').run(row.id);
+  return row.user_id;
 }
 
 export const DEFAULT_SETTINGS = {

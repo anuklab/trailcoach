@@ -2,7 +2,8 @@ import express from 'express';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, getSettings, setSettings, log, createUser, getUserByEmail, getUserById, verifyPassword, getAvatar, setAvatar } from './db.js';
+import { db, getSettings, setSettings, log, createUser, getUserByEmail, getUserById, verifyPassword, getAvatar, setAvatar, setPassword, deleteUser, createPasswordReset, consumePasswordReset } from './db.js';
+import { sendMail } from './mailer.js';
 import { today, addDays, mondayOf, diffDays } from './util.js';
 import { parseGpx } from './gpx.js';
 import { generatePlan, weeksOverview, estimateRaceHours, racesFor, targetFeasibility } from './planner.js';
@@ -49,7 +50,25 @@ function verifyState(s) {
 
 function publicUser(u) { return { id: u.id, email: u.email, name: u.name || null, avatar: u.avatar_data || null }; }
 
-app.post('/api/signup', (req, res) => {
+// Limitador de intentos muy simple, sin dependencias: protege login/signup/recuperación de
+// contraseña de fuerza bruta. En memoria (por proceso) — suficiente para un servidor propio de
+// un despliegue pequeño; si escalas a varias instancias, cámbialo por algo compartido (Redis...).
+const rateBuckets = new Map();
+function rateLimit(key, max, windowMs) {
+  return (req, res, next) => {
+    const id = `${key}:${req.ip}`;
+    const now = Date.now();
+    const bucket = rateBuckets.get(id) || [];
+    const recent = bucket.filter(t => now - t < windowMs);
+    if (recent.length >= max) return res.status(429).json({ error: 'Demasiados intentos. Espera unos minutos y vuelve a intentarlo.' });
+    recent.push(now);
+    rateBuckets.set(id, recent);
+    next();
+  };
+}
+setInterval(() => { rateBuckets.clear(); }, 60 * 60 * 1000).unref(); // limpieza periódica, evita crecer sin límite
+
+app.post('/api/signup', rateLimit('signup', 10, 15 * 60 * 1000), (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
   const name = req.body?.name ? String(req.body.name).trim() : null;
@@ -61,7 +80,7 @@ app.post('/api/signup', (req, res) => {
   res.json({ token: makeToken(user.id), user: publicUser(user) });
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', rateLimit('login', 15, 15 * 60 * 1000), (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
   const user = getUserByEmail(email);
@@ -69,8 +88,35 @@ app.post('/api/login', (req, res) => {
   res.json({ token: makeToken(user.id), user: publicUser(user) });
 });
 
+// Recuperación de contraseña. La respuesta es siempre la misma exista o no esa cuenta, para no
+// dejar averiguar por esta vía qué emails están registrados.
+app.post('/api/password/forgot', rateLimit('forgot', 6, 15 * 60 * 1000), async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const user = getUserByEmail(email);
+  if (user) {
+    const token = createPasswordReset(user.id);
+    const base = `${req.protocol}://${req.get('host')}`;
+    const link = `${base}/?reset=${token}`;
+    await sendMail({
+      to: user.email, subject: 'Recupera tu contraseña de TrailCoach',
+      text: `Alguien (esperamos que tú) pidió restablecer la contraseña de tu cuenta de TrailCoach.\n\nEntra en este enlace para elegir una nueva contraseña (caduca en 1 hora):\n${link}\n\nSi no has sido tú, ignora este correo — tu contraseña sigue igual.`,
+    });
+    log(user.id, 'auth', 'Solicitado restablecimiento de contraseña');
+  }
+  res.json({ ok: true, message: 'Si ese email tiene una cuenta, te hemos enviado un enlace para restablecer la contraseña.' });
+});
+app.post('/api/password/reset', rateLimit('reset', 10, 15 * 60 * 1000), (req, res) => {
+  const password = String(req.body?.password || '');
+  if (password.length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
+  const userId = consumePasswordReset(req.body?.token);
+  if (!userId) return res.status(400).json({ error: 'El enlace no es válido o ha caducado. Pide uno nuevo.' });
+  setPassword(userId, password);
+  log(userId, 'auth', 'Contraseña restablecida');
+  res.json({ token: makeToken(userId), user: publicUser(getUserById(userId)) });
+});
+
 app.use('/api', (req, res, next) => {
-  if (req.path === '/login' || req.path === '/signup' || req.path.startsWith('/strava/callback')) return next();
+  if (['/login', '/signup', '/password/forgot', '/password/reset'].includes(req.path) || req.path.startsWith('/strava/callback')) return next();
   const t = req.headers.authorization?.replace('Bearer ', '');
   const uid = verifyToken(t);
   if (!uid || !getUserById(uid)) return res.status(401).json({ error: 'No autenticado' });
@@ -240,6 +286,19 @@ app.put('/api/avatar', wrap((req, res) => {
   }
   setAvatar(req.userId, data || null);
   res.json({ avatar: data || null });
+}));
+
+// Borrado de cuenta (derecho a la supresión, RGPD): pide la contraseña actual como confirmación.
+// Las claves foráneas ON DELETE CASCADE se llevan por delante todos los datos del usuario
+// (carreras, actividades, sesiones, check-ins, nutrición, tokens de recuperación).
+app.delete('/api/account', wrap((req, res) => {
+  const user = getUserById(req.userId);
+  const password = String(req.body?.password || '');
+  // 403, no 401: un 401 aquí haría que el cliente interprete que la sesión ha caducado y cierre
+  // sesión sola — el problema no es la sesión, es que la contraseña escrita en el modal es incorrecta.
+  if (!verifyPassword(password, user.password_hash)) return res.status(403).json({ error: 'Contraseña incorrecta' });
+  deleteUser(req.userId);
+  res.json({ ok: true });
 }));
 
 // ---------- Strava ----------

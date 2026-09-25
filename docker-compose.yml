@@ -10,6 +10,11 @@ services:
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
       STRAVA_REDIRECT_URI: ${STRAVA_REDIRECT_URI:-}
       TZ_ATHLETE: ${TZ_ATHLETE:-Europe/Madrid}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     volumes:
       - trailcoach-data:/data
     expose:
