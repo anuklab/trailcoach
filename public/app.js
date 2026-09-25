@@ -39,6 +39,7 @@ const ICONS = {
   route: '<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 17c0-5 2-6 6-6s6-1 6-6"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.2 9.3a2.8 2.8 0 0 1 5.4.9c0 1.7-2.6 2-2.6 3.6"/><path d="M12 17.2h.01"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 15.4-6.4L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.4 6.4L3 16"/><path d="M3 21v-5h5"/>',
 };
 function icon(name, cls = '') { return `<svg class="icon ${cls}" viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`; }
 
@@ -61,7 +62,8 @@ const AVAIL_PRESETS = [
   { label: 'Mañana', s: '06:00', e: '09:00' },
   { label: 'Mediodía', s: '12:00', e: '14:00' },
   { label: 'Tarde', s: '17:00', e: '20:00' },
-  { label: 'Noche', s: '20:00', e: '22:00' },
+  { label: 'Noche', s: '20:00', e: '23:59' },
+  { label: 'Madrugada', s: '00:00', e: '06:00' },
 ];
 function timeToMin(t) { const [h, m] = (t || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); }
 function minToTime(min) { min = Math.max(0, Math.min(23 * 60 + 59, Math.round(min))); return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`; }
@@ -84,6 +86,12 @@ const AvailUI = {
   render(ns) { return this.stores[ns].map((windows, i) => this.dayBlock(ns, i, windows)).join(''); },
   dayBlock(ns, i, windows) {
     const total = dayTotalMin(windows);
+    // El horario personalizado se preselecciona correlativo al último tramo ya marcado ese día
+    // (empieza justo donde acaba el anterior), en vez de un valor fijo que podría solaparse o
+    // quedar suelto antes de los tramos existentes.
+    const lastEnd = windows.length ? windows.reduce((max, w) => timeToMin(w.e) > timeToMin(max) ? w.e : max, windows[0].e) : '18:00';
+    const defStart = lastEnd;
+    const defEnd = minToTime(timeToMin(lastEnd) + 60);
     return `<div class="avail-day-block">
       <div class="avail-day-head"><strong>${DIAS[i]}</strong><span class="small ${total ? 'muted' : 'avail-rest'}">${total ? hm(total) : 'Descanso'}</span></div>
       <div class="chip-row">
@@ -94,9 +102,9 @@ const AvailUI = {
         ${windows.length ? windows.map((w, wi) => `<span class="avail-range-chip">${w.s}–${w.e}<button type="button" onclick="AvailUI.removeWindow('${ns}',${i},${wi})">${icon('x')}</button></span>`).join('') : '<span class="small muted">Sin horarios marcados — día de descanso.</span>'}
       </div>
       <div class="avail-custom-row" id="avc-${ns}-${i}" style="display:none">
-        <input type="time" id="avc-s-${ns}-${i}" value="06:00">
+        <input type="time" id="avc-s-${ns}-${i}" value="${defStart}">
         <span class="small muted">–</span>
-        <input type="time" id="avc-e-${ns}-${i}" value="08:00">
+        <input type="time" id="avc-e-${ns}-${i}" value="${defEnd}">
         <button type="button" class="ghost small" onclick="AvailUI.addCustom('${ns}',${i})">Añadir</button>
       </div>
     </div>`;
@@ -768,12 +776,15 @@ async function saveRace(id) {
     closeModals();
     toast('Carrera guardada.');
     if (confirm('¿Regenerar el plan de entrenamiento ahora con esta carrera?')) await regenPlan();
-    else loadRacesInline();
+    else if ($('#planRaces')) loadRacesInline();
+    else if ($('#view-ajustes') && $('#view-ajustes').innerHTML.trim()) renderAjustes();
   } catch (e) { toast('Error: ' + e.message); }
 }
 async function deleteRace(id) {
   if (!confirm('¿Eliminar esta carrera?')) return;
-  await del(`/races/${id}`); closeModals(); toast('Carrera eliminada'); loadRacesInline();
+  await del(`/races/${id}`); closeModals(); toast('Carrera eliminada');
+  if ($('#planRaces')) loadRacesInline();
+  else if ($('#view-ajustes') && $('#view-ajustes').innerHTML.trim()) renderAjustes();
 }
 
 async function pacingModal(id) {
@@ -1141,7 +1152,8 @@ function fitnessChart(series) {
 // =================== AJUSTES ===================
 async function renderAjustes() {
   const el = $('#view-ajustes');
-  const [s, k, me] = await Promise.all([get('/settings'), get('/knowledge'), get('/me')]);
+  const [s, k, me, races] = await Promise.all([get('/settings'), get('/knowledge'), get('/me'), get('/races')]);
+  const mainRace = races.find(r => r.priority === 'A') || races[0] || null;
   const lib = k.strength_library;
   const theme = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   const initials = (s.athlete_name || me.email || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || '?';
@@ -1164,6 +1176,19 @@ async function renderAjustes() {
           <button type="button" class="${theme === 'light' ? 'active' : ''}" onclick="setTheme('light')">${icon('sun')} Día</button>
         </div>
       </div>
+    </div>
+    <div class="card">
+      <h2>Objetivo de carrera</h2>
+      ${mainRace ? `
+        <p class="small muted">${esc(mainRace.name)} · ${fmtDateLong(mainRace.date)}${mainRace.type === 'backyard' ? ' · Backyard Ultra' : ''}</p>
+        <p class="small">${mainRace.type === 'backyard'
+          ? [mainRace.dplus_m ? `${Math.round(mainRace.dplus_m)} m D+/vuelta` : '', mainRace.target_time_h ? `objetivo ${mainRace.target_time_h} h` : ''].filter(Boolean).join(' · ')
+          : [mainRace.distance_km ? `${mainRace.distance_km} km` : '', mainRace.dplus_m ? `${Math.round(mainRace.dplus_m)} m D+` : '', mainRace.target_time_h ? `objetivo ${mainRace.target_time_h} h` : ''].filter(Boolean).join(' · ')}</p>
+        <button style="width:100%;margin-top:8px" onclick="raceModal(${mainRace.id})">Cambiar objetivo</button>
+      ` : `
+        <p class="small muted">Todavía no tienes una carrera objetivo configurada.</p>
+        <button class="primary" style="width:100%" onclick="raceModal()">Añadir objetivo</button>
+      `}
     </div>
     <div class="card">
       <h2>Disponibilidad semanal</h2>
@@ -1551,19 +1576,26 @@ async function autoSyncStrava() {
     if (r.unlogged_nutrition && r.unlogged_nutrition.length) postSyncNutritionPrompt(r.unlogged_nutrition);
   } catch {}
 }
-// Registro del service worker + detección automática de nueva versión: en cuanto hay una
-// versión nueva instalada, le pedimos que tome el control ya y recargamos la página una vez,
-// para que el móvil (donde el usuario casi nunca cierra la pestaña) siempre acabe viendo lo último.
+// Notas de versión: cuando un despliegue trae algo que merece explicarse, añade aquí una entrada
+// con la MISMA cadena que la constante CACHE de sw.js (súbela en cada deploy). Si no hay nota para
+// esa versión, el aviso de actualización se muestra igualmente pero solo con el botón, sin texto.
+const RELEASE_NOTES = {
+  'trailcoach-shell-v8': 'Nuevo editor de disponibilidad por franjas horarias (incluida madrugada), objetivo editable desde Ajustes, plan específico para Backyard Ultra y cancelación de suscripción.',
+};
+
+// Registro del service worker + aviso de actualización: en vez de recargar solos por debajo del
+// usuario, cuando hay una versión nueva lista se muestra un botón grande de "Actualizar" (con una
+// nota si el cambio es importante) y se aplica solo cuando el usuario lo toca.
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.register('/sw.js').then(reg => {
-    // Si ya hay una versión esperando (instalada mientras la app no estaba abierta), actívala ya.
-    if (reg.waiting) reg.waiting.postMessage('skipWaiting');
+    // Si ya hay una versión esperando (instalada mientras la app no estaba abierta), avisa ya.
+    if (reg.waiting) showUpdateBanner(reg.waiting);
     reg.addEventListener('updatefound', () => {
       const sw = reg.installing;
       if (!sw) return;
       sw.addEventListener('statechange', () => {
-        if (sw.state === 'installed' && navigator.serviceWorker.controller) sw.postMessage('skipWaiting');
+        if (sw.state === 'installed' && navigator.serviceWorker.controller) showUpdateBanner(sw);
       });
     });
     // Comprueba si hay una versión nueva cada vez que la app vuelve a primer plano (útil en móvil,
@@ -1576,6 +1608,24 @@ function registerSW() {
     reloaded = true;
     location.reload();
   });
+}
+function showUpdateBanner(sw) {
+  if ($('#updateBanner')) return;
+  const el = document.createElement('div');
+  el.id = 'updateBanner';
+  el.className = 'update-banner';
+  el.innerHTML = `<div class="update-banner-inner">
+    <p id="updateBannerNote" class="small" style="display:none"></p>
+    <button class="primary" id="updateBannerBtn">${icon('refresh')} Actualizar TrailCoach</button>
+  </div>`;
+  document.body.appendChild(el);
+  // Averigua qué versión trae este SW en espera, para mostrar su nota si existe.
+  fetch('/sw.js', { cache: 'no-store' }).then(r => r.text()).then(txt => {
+    const m = txt.match(/const CACHE = '([^']+)'/);
+    const note = m && RELEASE_NOTES[m[1]];
+    if (note) { const n = $('#updateBannerNote'); if (n) { n.textContent = note; n.style.display = ''; } }
+  }).catch(() => {});
+  $('#updateBannerBtn').onclick = () => { sw.postMessage('skipWaiting'); el.remove(); };
 }
 async function boot() {
   if (!Auth.token) { showLogin(); return; }

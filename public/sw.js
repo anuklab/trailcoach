@@ -1,11 +1,14 @@
 // Service worker: shell de la app cacheado como red primero (network-first) para que el móvil
 // siempre vea la última versión en cuanto hay conexión, y solo caiga al caché si no hay red.
 // Los datos (API) nunca se cachean: siempre van a la red.
-const CACHE = 'trailcoach-shell-v7';
+const CACHE = 'trailcoach-shell-v8';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/logo-mark-128.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // Ya no se auto-activa (self.skipWaiting() aquí forzaba el cambio de versión al instante, por
+  // debajo del usuario): se queda "esperando" hasta que app.js le diga que el usuario ha tocado
+  // el botón de actualizar, así siempre ve el aviso antes de que la app cambie de versión.
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
