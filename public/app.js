@@ -143,6 +143,21 @@ $$('.tabbar button').forEach(b => {
   b.addEventListener('click', () => switchTab(b.dataset.tab));
 });
 $('.profile-btn').innerHTML = icon('gear');
+// El botón de perfil (arriba a la derecha) muestra tu foto si tienes una subida, y si no,
+// un icono de ajustes claro — nada de iconos ambiguos.
+function updateProfileBtn(avatarUrl) {
+  const btn = $('.profile-btn');
+  if (!btn) return;
+  if (avatarUrl) {
+    btn.innerHTML = '';
+    btn.style.backgroundImage = `url('${avatarUrl}')`;
+    btn.classList.add('has-photo');
+  } else {
+    btn.style.backgroundImage = '';
+    btn.classList.remove('has-photo');
+    btn.innerHTML = icon('gear');
+  }
+}
 
 function render(tab) {
   const fns = { hoy: renderHoy, plan: renderPlan, historial: renderHistorial, analisis: renderAnalisis, ajustes: renderAjustes };
@@ -171,10 +186,16 @@ async function renderHoy() {
       <p>${esc(adherence.message)}</p>
     </div>` : ''}
 
+    ${!checkin && tsb < -18 ? `
+    <div class="banner atencion">
+      ${icon('info')}
+      <p>Aún no has hecho el check-in de hoy, pero tus últimos entrenos ya muestran mucha carga acumulada (frescura ${Math.round(tsb)}). Si notas las piernas cargadas, no fuerces — puedes hacer el check-in para que ajuste el plan.</p>
+    </div>` : ''}
+
     <div class="stat-grid card tight">
-      <div class="stat" style="cursor:pointer" onclick="metricModal('forma')"><div class="v">${fitness.ctl}</div><div class="l">Forma ${icon('info')}</div></div>
-      <div class="stat" style="cursor:pointer" onclick="metricModal('fatiga')"><div class="v">${fitness.atl}</div><div class="l">Fatiga ${icon('info')}</div></div>
-      <div class="stat" style="cursor:pointer" onclick="metricModal('fresco')"><div class="v" style="color:${tsbColor}">${tsb > 0 ? '+' : ''}${tsb}</div><div class="l">${tsbLabel} ${icon('info')}</div></div>
+      <div class="stat" style="cursor:pointer" onclick="metricModal('forma')"><div class="v">${Math.round(fitness.ctl)}</div><div class="l">Forma ${icon('info')}</div></div>
+      <div class="stat" style="cursor:pointer" onclick="metricModal('fatiga')"><div class="v">${Math.round(fitness.atl)}</div><div class="l">Fatiga ${icon('info')}</div></div>
+      <div class="stat" style="cursor:pointer" onclick="metricModal('fresco')"><div class="v" style="color:${tsbColor}">${tsb > 0 ? '+' : ''}${Math.round(tsb)}</div><div class="l">${tsbLabel} ${icon('info')}</div></div>
     </div>
 
     ${month.activities ? `
@@ -939,14 +960,14 @@ async function renderAnalisis() {
   const el = $('#view-analisis');
   el.innerHTML = `<div class="list-empty">Cargando…</div>`;
   const from = addDays(todayStr(), -120), to = addDays(todayStr(), 21);
-  const series = await get(`/fitness?from=${from}&to=${to}`);
+  const [series, vo2] = await Promise.all([get(`/fitness?from=${from}&to=${to}`), get('/vo2max').catch(() => null)]);
   const todaySeries = series.find(s => s.date === todayStr()) || series[series.length - 1];
   el.innerHTML = `<h1>Análisis</h1>
     <div class="card">
       ${todaySeries ? `<div class="stat-grid tight" style="margin-bottom:6px">
-        <div class="stat" style="cursor:pointer" onclick="metricModal('forma')"><div class="v">${Math.round(todaySeries.ctl)}</div><div class="l">Forma</div></div>
-        <div class="stat" style="cursor:pointer" onclick="metricModal('fatiga')"><div class="v">${Math.round(todaySeries.atl)}</div><div class="l">Fatiga</div></div>
-        <div class="stat" style="cursor:pointer" onclick="metricModal('fresco')"><div class="v">${todaySeries.tsb > 0 ? '+' : ''}${Math.round(todaySeries.tsb)}</div><div class="l">Frescura</div></div>
+        <div class="stat" style="cursor:pointer" onclick="metricModal('forma')"><div class="v">${todaySeries.ctl}</div><div class="l">Forma</div></div>
+        <div class="stat" style="cursor:pointer" onclick="metricModal('fatiga')"><div class="v">${todaySeries.atl}</div><div class="l">Fatiga</div></div>
+        <div class="stat" style="cursor:pointer" onclick="metricModal('fresco')"><div class="v">${todaySeries.tsb > 0 ? '+' : ''}${todaySeries.tsb}</div><div class="l">Frescura</div></div>
       </div>` : ''}
       ${fitnessChart(series)}
     </div>
@@ -956,6 +977,15 @@ async function renderAnalisis() {
       <span style="color:var(--danger)">Fatiga (ATL)</span>: carga reciente (media de 7 días).
       Frescura (TSB) = Forma − Fatiga: positivo es fresco, muy negativo indica riesgo de sobrecarga.</p>
     </div>
+    ${vo2 && vo2.vo2max ? `
+    <div class="card">
+      <h3>Forma aeróbica estimada (VO2max)</h3>
+      <div class="stat-grid tight" style="margin:8px 0">
+        <div class="stat"><div class="v">${vo2.vo2max}</div><div class="l">ml/kg/min aprox.</div></div>
+      </div>
+      <p class="small muted">Calculado a partir de tu mejor esfuerzo llano reciente: "${esc(vo2.source.name)}" (${fmtDate(vo2.source.date)}), ${vo2.source.distance_km} km en ${hm(vo2.source.duration_min)} (${vo2.source.pace_min_km} min/km).</p>
+      <p class="source-note">Estimación aproximada (fórmulas de Jack Daniels y Jimmy Gilbert, las mismas detrás de las tablas VDOT) — no sustituye una prueba de laboratorio, y es menos fiable cuanto más desnivel tenga el tramo usado.</p>
+    </div>` : ''}
     <h2 style="margin-top:18px">Nutrición</h2>
     <div id="analisisNutricion"></div>`;
   loadNutritionInline();
@@ -1044,6 +1074,12 @@ async function renderAjustes() {
     </div>
     <button class="primary" style="width:100%" onclick="saveSettings()">Guardar ajustes</button>
     <div class="card" style="margin-top:20px">
+      <h2>Material</h2>
+      <p class="muted small">Lleva la cuenta del kilometraje de tus zapatillas y bastones — avisa cuando toque cambiarlos. El kilometraje de las zapatillas activas se suma solo al sincronizar Strava.</p>
+      <div id="gearList"><div class="list-empty">Cargando…</div></div>
+      <button style="width:100%;margin-top:8px" onclick="gearModal()">Añadir material</button>
+    </div>
+    <div class="card" style="margin-top:20px">
       <h2>Cuenta</h2>
       <p class="small muted">Conectado como <strong>${esc(me.email)}</strong></p>
       <button class="danger" style="width:100%;margin-top:6px" onclick="logout()">Cerrar sesión</button>
@@ -1053,7 +1089,67 @@ async function renderAjustes() {
   $$('#s-strengthmode .chip').forEach(c => c.addEventListener('click', () => {
     $$('#s-strengthmode .chip').forEach(x => x.classList.remove('selected')); c.classList.add('selected');
   }));
+  loadGearInline();
 }
+
+// ---------------- Material (zapatillas, bastones…) ----------------
+const GEAR_TYPE_LABEL = { zapatillas: 'Zapatillas', bastones: 'Bastones', mochila: 'Mochila', otro: 'Otro' };
+async function loadGearInline() {
+  const el = $('#gearList');
+  let items;
+  try { items = await get('/gear'); } catch { el.innerHTML = ''; return; }
+  gearCache = items;
+  const active = items.filter(g => !g.retired);
+  const retired = items.filter(g => g.retired);
+  el.innerHTML = active.length ? active.map(gearRow).join('') : '<p class="list-empty">Sin material registrado todavía.</p>';
+  if (retired.length) el.innerHTML += `<p class="small muted" style="margin-top:10px">Retirado: ${retired.map(g => esc(g.name)).join(', ')}</p>`;
+}
+function gearRow(g) {
+  const km = g.km_start + g.km_accrued;
+  const pct = Math.min(100, Math.round(km / (g.km_limit || 700) * 100));
+  const color = pct >= 100 ? 'var(--danger)' : pct >= 85 ? 'var(--warn)' : 'var(--accent)';
+  return `<div class="card tight" style="margin-top:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div><strong>${esc(g.name)}</strong> <span class="small muted">· ${GEAR_TYPE_LABEL[g.type] || g.type}${g.type === 'zapatillas' && g.active ? ' · en uso' : ''}</span></div>
+      <button class="ghost" onclick="gearModal(${g.id})">${icon('edit')}</button>
+    </div>
+    <div class="progressbar" style="margin-top:8px"><div style="width:${pct}%;background:${color}"></div></div>
+    <p class="small muted" style="margin-top:4px">${Math.round(km)} / ${Math.round(g.km_limit)} km${pct >= 100 ? ' — toca cambiarlo' : pct >= 85 ? ' — se acerca el cambio' : ''}</p>
+  </div>`;
+}
+function gearModal(id) {
+  const editing = !!id;
+  const g = editing ? gearCache.find(x => x.id === id) : null;
+  openModal(`
+    <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+    <h2>${editing ? 'Editar material' : 'Añadir material'}</h2>
+    <label>Nombre</label><input id="g-name" value="${esc(g?.name || '')}" placeholder="ej: Speedgoat 6">
+    <label>Tipo</label>
+    <select id="g-type">${Object.entries(GEAR_TYPE_LABEL).map(([k, v]) => `<option value="${k}" ${g?.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+    <div class="row">
+      <div><label>Km ya recorridos (opcional)</label><input id="g-start" type="number" value="${g?.km_start ?? 0}"></div>
+      <div><label>Cambiar a los (km)</label><input id="g-limit" type="number" value="${g?.km_limit ?? 700}"></div>
+    </div>
+    ${(g?.type || 'zapatillas') === 'zapatillas' ? `<label><input type="checkbox" id="g-active" ${g?.active || !editing ? 'checked' : ''} style="width:auto"> En uso (suma km automáticamente al sincronizar Strava)</label>` : ''}
+    <div class="row" style="margin-top:12px">
+      ${editing ? `<button class="danger" onclick="deleteGearConfirm(${id})">Eliminar</button>` : '<div></div>'}
+      ${editing && !g.retired ? `<button onclick="retireGear(${id})">Retirar</button>` : ''}
+      <button class="primary" onclick="saveGear(${id || 'null'})">Guardar</button>
+    </div>
+  `, { center: true });
+}
+let gearCache = [];
+async function saveGear(id) {
+  const body = {
+    name: $('#g-name').value.trim() || 'Material', type: $('#g-type').value,
+    km_start: +$('#g-start').value || 0, km_limit: +$('#g-limit').value || 700,
+    active: $('#g-active') ? $('#g-active').checked : false,
+  };
+  if (id) await put(`/gear/${id}`, body); else await post('/gear', body);
+  closeModals(); toast('Material guardado'); loadGearInline();
+}
+async function retireGear(id) { await put(`/gear/${id}`, { retired: true, active: false }); closeModals(); toast('Material retirado'); loadGearInline(); }
+async function deleteGearConfirm(id) { if (!confirm('¿Eliminar este material?')) return; await del(`/gear/${id}`); closeModals(); toast('Eliminado'); loadGearInline(); }
 async function saveSettings() {
   const availability = $$('.avail').map(i => +i.value || 0);
   const modeChip = $('#s-strengthmode .chip.selected');
@@ -1082,12 +1178,14 @@ async function onAvatarFile(input) {
     const dataUrl = await resizeImageFile(file, 300);
     await put('/avatar', { data: dataUrl });
     toast('Foto actualizada');
+    updateProfileBtn(dataUrl);
     renderAjustes();
   } catch (e) { toast('Error: ' + e.message); }
 }
 async function removeAvatar() {
   if (!confirm('¿Quitar la foto de perfil?')) return;
   await put('/avatar', { data: null });
+  updateProfileBtn(null);
   renderAjustes();
 }
 // Redimensiona y recorta la imagen a un cuadrado (cover) de `size`x`size` px en JPEG,
@@ -1282,6 +1380,7 @@ async function boot() {
   let me;
   try { me = await get('/me'); }
   catch (e) { showLogin(); return; }
+  updateProfileBtn(me.avatar);
   let s = null;
   try { s = await get('/settings'); } catch {}
   if (s && !s.onboarding_done) { Onboarding.start(me.name || s.athlete_name || ''); return; }

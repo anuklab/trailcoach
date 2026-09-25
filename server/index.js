@@ -13,6 +13,8 @@ import { adherenceStatus, monthSummary } from './adherence.js';
 import { buildPacingPlan } from './pacing.js';
 import * as Nutrition from './nutrition.js';
 import { NUTRITION_GUIDE, STRENGTH_GUIDE, STRENGTH_LIBRARY, nutritionTargetsFor, METHOD_GUIDE, hrZones, GEL_PRESETS } from './knowledge.js';
+import { estimateVO2max } from './vo2.js';
+import { listGear, addGear, updateGear, deleteGear } from './gear.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -216,6 +218,19 @@ app.get('/api/fitness', wrap((req, res) => {
   const to = req.query.to || addDays(today(), 21);
   res.json(fitnessSeries(req.userId, from, to, { includePlanned: true }));
 }));
+// VO2max estimado a partir del mejor esfuerzo llano reciente (ver vo2.js). Puede devolver {}
+// si todavía no hay ninguna actividad que sirva de referencia.
+app.get('/api/vo2max', wrap((req, res) => res.json(estimateVO2max(req.userId) || {})));
+
+// ---------- Material (zapatillas, bastones…) ----------
+app.get('/api/gear', wrap((req, res) => res.json(listGear(req.userId))));
+app.post('/api/gear', wrap((req, res) => res.json(addGear(req.userId, req.body || {}))));
+app.put('/api/gear/:id', wrap((req, res) => {
+  const g = updateGear(req.userId, req.params.id, req.body || {});
+  if (!g) return res.status(404).json({ error: 'No encontrado' });
+  res.json(g);
+}));
+app.delete('/api/gear/:id', wrap((req, res) => { deleteGear(req.userId, req.params.id); res.json({ ok: true }); }));
 app.get('/api/activities', wrap((req, res) => {
   const from = req.query.from || addDays(today(), -90), to = req.query.to || today();
   res.json(db.prepare('SELECT id,name,sport_type,date,distance_m,moving_time_s,elevation_gain_m,avg_hr,load FROM activities WHERE user_id = ? AND date BETWEEN ? AND ? ORDER BY date DESC').all(req.userId, from, to));

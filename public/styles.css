@@ -50,6 +50,7 @@ label { display: block; font-size: .82rem; color: var(--muted); margin: .6em 0 .
 .brand small { display: block; font-size: .68rem; font-weight: 500; color: var(--muted); letter-spacing: .02em; margin-top: -1px; }
 .profile-btn { width: 34px; height: 34px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--panel2); border: 1px solid var(--border); color: var(--muted); }
 .profile-btn .icon { width: 18px; height: 18px; }
+.profile-btn.has-photo { background-size: cover; background-position: center; border-color: var(--accent); }
 .theme-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
 .theme-toggle button { border: none; border-radius: 0; background: transparent; padding: .5em 1em; display: flex; align-items: center; gap: .4em; }
 .theme-toggle button.active { background: var(--accent); color: #0e1512; font-weight: 700; }
