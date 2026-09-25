@@ -82,7 +82,15 @@ function recentBaseline(userId, from) {
 // ---------- Estructura semanal ----------
 
 function racesForUser(userId) {
-  return db.prepare('SELECT * FROM races WHERE user_id = ? ORDER BY date').all(userId).map(r => ({ ...r, est_h: estimateRaceHours(userId, r) }));
+  return db.prepare('SELECT * FROM races WHERE user_id = ? ORDER BY date').all(userId).map(r => {
+    if (r.type === 'backyard') {
+      // En un Backyard Ultra se corre 1 vuelta ("yard") fija cada hora en punto hasta que solo
+      // queda un finisher: no hay "tiempo estimado" por ritmo, el objetivo ES directamente el
+      // nº de horas/vueltas que el atleta se plantea aguantar (target_time_h).
+      return { ...r, est_h: r.target_time_h || 24 };
+    }
+    return { ...r, est_h: estimateRaceHours(userId, r) };
+  });
 }
 
 // ---------- Generación ----------
@@ -112,7 +120,10 @@ export function generatePlan(userId, { from = null, reason = 'Plan generado' } =
     const methodology = selectMethodology(userId, ws, ph);
     const race = ph.race;
     const peakMin = race ? Math.min(capMin, clamp((race.est_h || 20) * 0.4 + 6, 8, 18) * 60) : capMin * 0.7;
-    const dens = race?.dplus_m && race.est_h ? race.dplus_m / race.est_h : 200; // m/h de carrera
+    // m/h de carrera. En Backyard Ultra el "m/h" es literal: cada vuelta (1 h) tiene ese D+ fijo.
+  const dens = race?.dplus_m
+    ? (race.type === 'backyard' ? race.dplus_m : (race.est_h ? race.dplus_m / race.est_h : 200))
+    : 200;
     const peakLong = race ? Math.min(st.availability[st.long_day] || 240, clamp((race.est_h || 10) * 0.2 * 60, 120, 390)) : 180;
 
     let weekMin, phase = ph.phase, densF = 0.6, deload = false;
@@ -163,6 +174,7 @@ export function generatePlan(userId, { from = null, reason = 'Plan generado' } =
 
 function buildWeek(w) {
   const { ws, phase, race, st, methodology, deload } = w;
+  const isBackyard = race?.type === 'backyard';
   const avail = st.availability.slice();
   const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(ws, i));
   const sessions = [];
@@ -177,7 +189,11 @@ function buildWeek(w) {
   if (phase === 'race') {
     const r = w.race; const ri = weekday(r.date);
     for (let i = 0; i < 7; i++) {
-      if (i === ri) sessions.push(mk(i, 'race', (r.est_h || 10) * 60, { dplus_m: r.dplus_m || 0, distance_km: r.distance_km, key: true, zone: 'Z2-Z3' }));
+      if (i === ri) sessions.push(mk(i, 'race', (r.est_h || 10) * 60, {
+        // En Backyard el D+ del "día de carrera" es acumulado (vueltas x D+/vuelta), no el de una sola vuelta.
+        dplus_m: r.type === 'backyard' ? Math.round((r.dplus_m || 0) * (r.est_h || 0)) : (r.dplus_m || 0),
+        distance_km: r.distance_km, key: true, zone: 'Z2-Z3',
+      }));
       else if (i < ri && ri - i <= 1) sessions.push(mk(i, 'rest', 0));
       else if (i < ri && ri - i === 2) sessions.push(mk(i, 'easy', 30, { variant: 'activacion' }));
       else if (i < ri && ri - i === 4) sessions.push(mk(i, 'tempo', 45, { variant: 'recordatorio' }));
@@ -228,10 +244,12 @@ function buildWeek(w) {
   // Qué tipo de sesión de calidad toca según fase: base introduce desnivel suave; construcción
   // combina desnivel + series (pieza polarizada); específico y peak combinan desnivel + tempo
   // (pieza piramidal, ya en terreno de carrera); afinado solo mantiene un recuerdo de desnivel.
-  const qTypes = {
-    base: ['vert'], build: ['vert', 'intervals'], specific: ['vert', 'tempo'],
-    peak: ['vert', 'tempo'], taper: ['vert'],
-  }[phase] || [];
+  // En Backyard Ultra la calidad no es umbral/VO2max: es aguantar el mismo esfuerzo moderado,
+  // vuelta tras vuelta, cumpliendo la hora en punto. Por eso sustituye tempo/series por 'loop'
+  // (simulacro de vueltas) y mantiene 'vert' solo si la vuelta real tiene desnivel relevante.
+  const qTypes = isBackyard
+    ? { base: ['loop'], build: ['loop', 'vert'], specific: ['loop', 'vert'], peak: ['loop', 'vert'], taper: ['loop'] }[phase] || []
+    : { base: ['vert'], build: ['vert', 'intervals'], specific: ['vert', 'tempo'], peak: ['vert', 'tempo'], taper: ['vert'] }[phase] || [];
   // Las sesiones de desnivel alternan subida/bajada. Cuando la carrera objetivo es muy técnica de
   // bajada (o estamos ya en específico/peak, priorizando especificidad de montaña) sesgamos hacia
   // más sesiones de bajada/excéntrico, que es lo que más protege la rodilla en carrera.
@@ -240,10 +258,14 @@ function buildWeek(w) {
     ? (weekIdx % 3 === 0 ? 'subida' : 'bajada')
     : (weekIdx % 2 === 0 ? 'subida' : 'bajada');
   quality.forEach((i, k) => {
-    const t = qTypes[k] || 'tempo';
-    const d = Math.min(avail[i], ['specific', 'peak'].includes(phase) ? 90 : phase === 'build' ? 75 : 60);
-    plan[i] = mk(i, t, d, { key: true, zone: t === 'intervals' ? 'Z4-Z5' : t === 'vert' ? 'Z3-Z4' : 'Z3',
-      ...(t === 'vert' ? { variant: vertVariant } : {}) });
+    const t = qTypes[k] || (isBackyard ? 'loop' : 'tempo');
+    const d = t === 'loop'
+      ? Math.min(avail[i], { base: 75, build: 105, specific: 150, peak: 180, taper: 60 }[phase] ?? 90)
+      : Math.min(avail[i], ['specific', 'peak'].includes(phase) ? 90 : phase === 'build' ? 75 : 60);
+    plan[i] = mk(i, t, d, { key: true, zone: t === 'intervals' ? 'Z4-Z5' : t === 'vert' ? 'Z3-Z4' : t === 'loop' ? 'Z2-Z3' : 'Z3',
+      ...(t === 'vert' ? { variant: vertVariant } : {}),
+      // El D+ del simulacro sale directo de la densidad de la vuelta real (dens = m/h en backyard).
+      ...(t === 'loop' ? { dplus_m: Math.round(d / 60 * w.dens) } : {}) });
     remaining -= d;
   });
 

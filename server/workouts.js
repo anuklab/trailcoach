@@ -14,6 +14,7 @@ const TITLES = {
   rest: 'Descanso', easy: 'Rodaje suave', recovery: 'Recuperación activa', long: 'Tirada larga',
   b2b: 'Segunda tirada (back-to-back)', vert: 'Subida fuerte + técnica', vert_bajada: 'Técnica de bajada',
   tempo: 'Tempo / umbral', intervals: 'Series', strength: 'Fuerza para trail', race: 'Carrera', cross: 'Entreno cruzado',
+  loop: 'Simulacro de vueltas (Backyard)',
 };
 
 // Objetivo de nutrición para una sesión larga concreta, a partir del peso del atleta y de
@@ -70,6 +71,13 @@ const WHY = {
     base: 'suma volumen aeróbico de baja fatiga — el pilar del entrenamiento polarizado en esta fase.',
     build: 'rellena volumen fácil entre los días de calidad, para que la carga total suba sin añadir más fatiga de la necesaria.',
   },
+  loop: {
+    base: 'introduce el gesto del Backyard: vueltas cortas repetidas a ritmo controlado, sin buscar velocidad todavía.',
+    build: 'sube el nº de vueltas seguidas para acostumbrar a las piernas y a la cabeza a la repetición, que es lo que de verdad se entrena aquí.',
+    specific: 'entrena la disciplina de pacing más importante del Backyard: entrar en el corral con margen cada hora, ni un segundo de más buscando velocidad de sobra.',
+    peak: 'último gran simulacro antes de la carrera: vueltas, ritmo de corral y, si puedes, alguna de noche — practicar el sueño perdido es tan importante como las piernas.',
+    taper: 'mantiene la memoria del ritmo de vuelta sin acumular fatiga nueva de cara a la carrera.',
+  },
 };
 function whyFor(type, phase) {
   const w = WHY[type]?.[phase];
@@ -101,12 +109,24 @@ export function describe(s, ctx = {}) {
         (race ? ` Simula el terreno, el material y la alimentación de ${race.name}.` : '') +
         (poles ? ' Lleva bastones y practica plegarlos/desplegarlos sin parar.' : '') +
         fuelNote(s.duration_min, weight) +
-        (nightRace ? ' Si puedes, arranca al atardecer o lleva el frontal para practicar correr con luz artificial: en tu carrera pasarás horas de noche.' : '');
+        (nightRace ? ' Si puedes, arranca al atardecer o lleva el frontal para practicar correr con luz artificial: en tu carrera pasarás horas de noche.' : '') +
+        (race?.type === 'backyard' ? ' Aunque hoy no cuentes vueltas, mete algún tramo caminando fuerte a propósito: en el Backyard el ritmo lo manda el reloj, no tus piernas.' : '');
       break;
     case 'b2b':
       desc = `${hm(s.duration_min)} suave-moderado el día después de la tirada larga, a propósito con las piernas cargadas y sin recuperar del todo. Es el entreno más específico de ultra: enseña al cuerpo a seguir moviéndose bien fatigado, que es justo lo que te pedirá la segunda mitad de la carrera.` +
+        fuelNote(s.duration_min, weight) +
+        (race?.type === 'backyard' ? ' En Backyard esto es doblemente específico: es la mejor forma de entrenar días consecutivos de fatiga acumulada sin someter al cuerpo a una única tirada gigante.' : '');
+      break;
+    case 'loop': {
+      const lapMin = 60; // 1 vuelta = 1 hora en punto, por definición del formato Backyard
+      const reps = Math.max(2, Math.round(s.duration_min / lapMin) || Math.round(s.duration_min / 45));
+      desc = `${hm(s.duration_min)} en Z2-Z3 imitando el formato Backyard: corre/camina un circuito corto que puedas completar en unos 40-50 min, descansa lo que quede hasta la hora en punto (come, bebe, cambia calzado si hace falta) y vuelve a salir en el minuto 60. Repite el ciclo el tiempo que dure la sesión (${reps} vueltas aprox.).` +
+        (s.dplus_m ? ` Si puedes, busca un circuito con desnivel parecido al de tu carrera (~${s.dplus_m} m en el total de hoy).` : '') +
+        ' Lo que se entrena aquí no es el ritmo: es no adelantarte al reloj y aguantar la rutina de la vuelta una y otra vez, que es lo que decide un Backyard.' +
+        (ctx.phase === 'peak' ? ' Si puedes, haz esta sesión (o parte) de noche: la fatiga acumulada y el sueño perdido pesan tanto como las piernas en la recta final de un Backyard.' : '') +
         fuelNote(s.duration_min, weight);
       break;
+    }
     case 'vert':
       if (s.variant === 'bajada') {
         desc = `${hm(s.duration_min)}${s.dplus_m ? ` con ${s.dplus_m} m D-` : ''} centrado en bajadas técnicas: busca senda con piedra suelta o raíces si tienes. Apoyo en mediopié, pasos cortos y rápidos, mirada 2-3 pasos por delante, brazos abiertos para el equilibrio — evita frenar solo con el cuádriceps, es lo que más destroza las piernas en un ultra. Sube caminando entre repeticiones para no acumular fatiga de más.`;
@@ -135,7 +155,10 @@ export function describe(s, ctx = {}) {
       break;
     case 'race':
       if (s.raceC) { title = `Carrera: ${s.raceC.name}`; desc = `${s.raceC.distance_km ?? '?'} km${s.raceC.dplus_m ? `, ${s.raceC.dplus_m} m D+` : ''}. Carrera de entreno: úsala como simulacro real — mismo material, misma estrategia de alimentación que en tu objetivo.`; }
-      else if (race) {
+      else if (race?.type === 'backyard') {
+        title = `Carrera objetivo: ${race.name}`;
+        desc = `Backyard Ultra${race.dplus_m ? ` — ${race.dplus_m} m D+ por vuelta` : ''}. Objetivo: ${race.target_time_h || '?'} h (≈${race.target_time_h ? Math.round(race.target_time_h) : '?'} vueltas). ¡El gran día! Sal siempre relajado en cada vuelta, no corras nunca solo por entrar antes al corral, come y bebe todas las vueltas aunque no tengas hambre, y piensa en la siguiente vuelta, no en cuántas quedan.`;
+      } else if (race) {
         title = `Carrera objetivo: ${race.name}`;
         desc = `${race.distance_km ?? '?'} km, ${race.dplus_m ?? '?'} m D+. ¡El gran día! Reparte el esfuerzo, no arranques rápido en los primeros km de bajada de adrenalina, come y bebe desde el minuto 1 aunque no tengas hambre, y confía en las piernas que has entrenado.`;
       }

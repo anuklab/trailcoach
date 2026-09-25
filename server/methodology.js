@@ -55,7 +55,10 @@ export function phaseForWeek(ws, races) {
   const prev = main.filter(r => r.date < ws).pop();
   if (prev) {
     const weeksAfter = Math.ceil(diffDays(mondayOf(prev.date), ws) / 7);
-    const big = (prev.distance_km || 0) + (prev.dplus_m || 0) / 100 > 120;
+    // Un Backyard Ultra siempre exige una recuperación grande, corra lo que corra el atleta: son
+    // horas y horas de esfuerzo repetido (a menudo de noche, con privación de sueño), no algo que
+    // se mida bien con la fórmula distancia+desnivel de una ultra de recorrido fijo.
+    const big = prev.type === 'backyard' ? true : (prev.distance_km || 0) + (prev.dplus_m || 0) / 100 > 120;
     if (weeksAfter === 1) return { phase: 'recovery', race: prev, factor: prev.priority === 'A' || big ? 0.35 : 0.55 };
     if (weeksAfter === 2 && big) return { phase: 'recovery', race: prev, factor: 0.65 };
   }
@@ -100,7 +103,9 @@ export function selectMethodology(userId, ws, ph) {
   const fit = currentFitness(userId, ws);
   const weeksToRace = race ? Math.max(0, Math.round(diffDays(ws, mondayOf(race.date)) / 7)) : null;
   const dPlusPerKm = race?.dplus_m && race?.distance_km ? race.dplus_m / race.distance_km : 0;
-  const vertHeavy = dPlusPerKm > 25; // carrera muy de montaña (>25 m D+/km de media)
+  // En Backyard Ultra no hay distance_km (vuelta fija): usamos el D+ de la propia vuelta
+  // directamente — más de 200 m en una vuelta de ~6.7 km ya es una "yard" claramente de montaña.
+  const vertHeavy = race?.type === 'backyard' ? (race.dplus_m || 0) > 200 : dPlusPerKm > 25;
   const im = intensityModel(phase);
 
   // Adaptación continua por fatiga real: si el atleta llega muy cargado varios días seguidos
