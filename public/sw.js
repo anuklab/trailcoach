@@ -1,7 +1,7 @@
 // Service worker: shell de la app cacheado como red primero (network-first) para que el móvil
 // siempre vea la última versión en cuanto hay conexión, y solo caiga al caché si no hay red.
 // Los datos (API) nunca se cachean: siempre van a la red.
-const CACHE = 'trailcoach-shell-v6';
+const CACHE = 'trailcoach-shell-v7';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/logo-mark-128.png'];
 
 self.addEventListener('install', e => {

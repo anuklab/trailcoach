@@ -38,6 +38,7 @@ const ICONS = {
   target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
   route: '<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 17c0-5 2-6 6-6s6-1 6-6"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.2 9.3a2.8 2.8 0 0 1 5.4.9c0 1.7-2.6 2-2.6 3.6"/><path d="M12 17.2h.01"/>',
 };
 function icon(name, cls = '') { return `<svg class="icon ${cls}" viewBox="0 0 24 24">${ICONS[name] || ''}</svg>`; }
 
@@ -51,6 +52,83 @@ function todayStr() { const d = new Date(); return `${d.getFullYear()}-${String(
 function addDays(d, n) { const dt = new Date(d + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + n); return dt.toISOString().slice(0, 10); }
 function hm(min) { min = Math.round(min || 0); const h = Math.floor(min / 60), m = min % 60; return h ? `${h}h${m ? ` ${m}m` : ''}` : `${m} min`; }
 function esc(s) { return (s ?? '').toString().replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+// ---------------- Disponibilidad por franjas horarias ----------------
+// Cada día puede tener varias franjas (ej: 06:00–09:00 y 17:00–22:00, para quien entrena antes y
+// después del trabajo). Los minutos totales del día (lo que usa el planificador) se calculan
+// sumando la duración de todas sus franjas.
+const AVAIL_PRESETS = [
+  { label: 'Mañana', s: '06:00', e: '09:00' },
+  { label: 'Mediodía', s: '12:00', e: '14:00' },
+  { label: 'Tarde', s: '17:00', e: '20:00' },
+  { label: 'Noche', s: '20:00', e: '22:00' },
+];
+function timeToMin(t) { const [h, m] = (t || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); }
+function minToTime(min) { min = Math.max(0, Math.min(23 * 60 + 59, Math.round(min))); return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`; }
+function windowMin(w) { return Math.max(0, timeToMin(w.e) - timeToMin(w.s)); }
+function dayTotalMin(windows) { return (windows || []).reduce((a, w) => a + windowMin(w), 0); }
+// Migra la disponibilidad antigua (solo minutos totales, sin horario) a una franja genérica, para
+// que quien ya tenía la app configurada la vea reflejada al entrar en esta nueva vista.
+function seedWindowsFromMinutes(mins) {
+  return (mins || []).map(m => m > 0 ? [{ s: '17:00', e: minToTime(timeToMin('17:00') + m) }] : []);
+}
+const AvailUI = {
+  stores: {},
+  init(ns, windowsOrMinutes) {
+    // windowsOrMinutes puede venir como franjas ya guardadas ([[{s,e},...], x7]) o, para compatibilidad
+    // con cuentas antiguas / el valor por defecto, como minutos totales por día ([0,75,75,...]).
+    const isWindows = Array.isArray(windowsOrMinutes) && windowsOrMinutes.length === 7 && windowsOrMinutes.every(x => Array.isArray(x));
+    const windows = isWindows ? windowsOrMinutes : seedWindowsFromMinutes(Array.isArray(windowsOrMinutes) ? windowsOrMinutes : []);
+    this.stores[ns] = windows.map(day => (day || []).map(w => ({ ...w })));
+  },
+  render(ns) { return this.stores[ns].map((windows, i) => this.dayBlock(ns, i, windows)).join(''); },
+  dayBlock(ns, i, windows) {
+    const total = dayTotalMin(windows);
+    return `<div class="avail-day-block">
+      <div class="avail-day-head"><strong>${DIAS[i]}</strong><span class="small ${total ? 'muted' : 'avail-rest'}">${total ? hm(total) : 'Descanso'}</span></div>
+      <div class="chip-row">
+        ${AVAIL_PRESETS.map(p => `<div class="chip ${windows.some(w => w.s === p.s && w.e === p.e) ? 'selected' : ''}" onclick="AvailUI.togglePreset('${ns}',${i},'${p.s}','${p.e}')">${p.label}</div>`).join('')}
+        <div class="chip" onclick="AvailUI.toggleCustomRow('${ns}',${i})">${icon('plus')} Horario</div>
+      </div>
+      <div class="avail-ranges">
+        ${windows.length ? windows.map((w, wi) => `<span class="avail-range-chip">${w.s}–${w.e}<button type="button" onclick="AvailUI.removeWindow('${ns}',${i},${wi})">${icon('x')}</button></span>`).join('') : '<span class="small muted">Sin horarios marcados — día de descanso.</span>'}
+      </div>
+      <div class="avail-custom-row" id="avc-${ns}-${i}" style="display:none">
+        <input type="time" id="avc-s-${ns}-${i}" value="06:00">
+        <span class="small muted">–</span>
+        <input type="time" id="avc-e-${ns}-${i}" value="08:00">
+        <button type="button" class="ghost small" onclick="AvailUI.addCustom('${ns}',${i})">Añadir</button>
+      </div>
+    </div>`;
+  },
+  togglePreset(ns, day, s, e) {
+    const windows = this.stores[ns][day];
+    const idx = windows.findIndex(w => w.s === s && w.e === e);
+    if (idx >= 0) windows.splice(idx, 1); else windows.push({ s, e });
+    this.reRender(ns);
+  },
+  toggleCustomRow(ns, day) {
+    const el = document.getElementById(`avc-${ns}-${day}`);
+    if (el) el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+  },
+  addCustom(ns, day) {
+    const s = document.getElementById(`avc-s-${ns}-${day}`).value;
+    const e = document.getElementById(`avc-e-${ns}-${day}`).value;
+    if (!s || !e || timeToMin(e) <= timeToMin(s)) { toast('Elige un horario válido (la hora de fin debe ser posterior a la de inicio)'); return; }
+    this.stores[ns][day].push({ s, e });
+    this.reRender(ns);
+  },
+  removeWindow(ns, day, idx) {
+    this.stores[ns][day].splice(idx, 1);
+    this.reRender(ns);
+  },
+  reRender(ns) {
+    const el = document.getElementById(`availBlock-${ns}`);
+    if (el) el.innerHTML = this.render(ns);
+  },
+  minutes(ns) { return this.stores[ns].map(dayTotalMin); },
+  windows(ns) { return this.stores[ns]; },
+};
 
 function toast(msg) {
   const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
@@ -172,6 +250,7 @@ $$('.tabbar button').forEach(b => {
   b.addEventListener('click', () => switchTab(b.dataset.tab));
 });
 $('.profile-btn').innerHTML = icon('gear');
+if ($('.support-btn')) $('.support-btn').innerHTML = icon('help');
 // El botón de perfil (arriba a la derecha) muestra tu foto si tienes una subida, y si no,
 // un icono de ajustes claro — nada de iconos ambiguos.
 function updateProfileBtn(avatarUrl) {
@@ -547,7 +626,7 @@ async function loadRacesInline() {
     <div id="raceList">${races.length ? races.map(raceRow).join('') : '<div class="list-empty">Añade tu primera carrera objetivo (CDH o UTMB, por ejemplo).</div>'}</div>
   `;
   // feasibility del objetivo, si lo hay (llamada ligera por carrera)
-  races.filter(r => r.target_time_h).forEach(async r => {
+  races.filter(r => r.target_time_h && r.type !== 'backyard').forEach(async r => {
     try {
       const { feasibility } = await get(`/races/${r.id}/estimate`);
       const el2 = document.querySelector(`[data-race="${r.id}"] .target-slot`);
@@ -557,17 +636,21 @@ async function loadRacesInline() {
 }
 function raceRow(r) {
   const prio = { A: 'Objetivo (A)', B: 'Preparatoria (B)', C: 'Entreno (C)' }[r.priority] || r.priority;
+  const isBY = r.type === 'backyard';
   return `<div class="card" data-race="${r.id}">
     <div style="display:flex;justify-content:space-between;cursor:pointer" onclick="raceModal(${r.id})">
-      <strong>${esc(r.name)}</strong><span class="pill">${prio}</span>
+      <strong>${esc(r.name)}</strong><span class="pill">${prio}${isBY ? ' · Backyard' : ''}</span>
     </div>
-    <p class="muted small">${fmtDateLong(r.date)}${r.est_h ? ` · previsión ${r.est_h.toFixed(1)} h` : ''}</p>
-    <p class="small">${r.distance_km ? `${r.distance_km} km` : '?'} ${r.dplus_m ? `· ${Math.round(r.dplus_m)} m D+` : ''} ${r.time_limit_h ? `· límite ${r.time_limit_h} h` : ''}</p>
-    <div class="target-slot" style="margin:4px 0"></div>
+    <p class="muted small">${fmtDateLong(r.date)}${!isBY && r.est_h ? ` · previsión ${r.est_h.toFixed(1)} h` : ''}</p>
+    <p class="small">${isBY
+      ? `${r.dplus_m ? `${Math.round(r.dplus_m)} m D+/vuelta` : '?'}`
+      : `${r.distance_km ? `${r.distance_km} km` : '?'} ${r.dplus_m ? `· ${Math.round(r.dplus_m)} m D+` : ''}`}
+      ${r.time_limit_h ? `· límite ${r.time_limit_h} h` : ''}</p>
+    <div class="target-slot" style="margin:4px 0">${isBY && r.target_time_h ? `<span class="target-badge">${icon('target')} ${r.target_time_h} h objetivo</span>` : ''}</div>
     ${r.profile ? profileSvg(JSON.parse(r.profile)) : ''}
     <div class="row" style="margin-top:8px">
       <button onclick="raceModal(${r.id})">Editar</button>
-      ${r.target_time_h ? `<button class="primary" onclick="pacingModal(${r.id})">Plan de carrera</button>` : ''}
+      ${!isBY && r.target_time_h ? `<button class="primary" onclick="pacingModal(${r.id})">Plan de carrera</button>` : ''}
     </div>
   </div>`;
 }
@@ -582,15 +665,23 @@ function profileSvg(profile) {
 
 let gpxParsed = null;
 let aidStationsState = [];
+let raceModalType = 'ultra';
 function raceModal(id) {
   gpxParsed = null;
   const editing = id ? get(`/races`).then(rs => rs.find(r => r.id === id)) : Promise.resolve(null);
   editing.then(r => {
     aidStationsState = r?.aid_stations ? JSON.parse(r.aid_stations) : [];
+    raceModalType = r?.type === 'backyard' ? 'backyard' : 'ultra';
+    const isBY = raceModalType === 'backyard';
     openModal(`
       <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
       <h2>${r ? 'Editar carrera' : 'Nueva carrera'}</h2>
-      <label>Nombre</label><input id="r-name" value="${r ? esc(r.name) : ''}" placeholder="ej: CDH 110K - Val d'Aran by UTMB">
+      <label>Nombre</label><input id="r-name" value="${r ? esc(r.name) : ''}" placeholder="Nombre de la carrera">
+      <label>Tipo de carrera</label>
+      <div class="chip-row" id="r-type">
+        <div class="chip ${!isBY ? 'selected' : ''}" data-v="ultra" onclick="raceSetType('ultra')">Carrera de ultra</div>
+        <div class="chip ${isBY ? 'selected' : ''}" data-v="backyard" onclick="raceSetType('backyard')">Backyard Ultra</div>
+      </div>
       <label>Fecha</label><input id="r-date" type="date" value="${r ? r.date : ''}">
       <label>Hora de salida</label><input id="r-start" type="time" value="${r?.start_time || ''}">
       <label>Prioridad</label>
@@ -600,11 +691,11 @@ function raceModal(id) {
         <option value="C" ${r?.priority === 'C' ? 'selected' : ''}>C — Carrera de entreno</option>
       </select>
       <div class="row">
-        <div><label>Distancia (km)</label><input id="r-dist" type="number" value="${r?.distance_km ?? ''}"></div>
-        <div><label>D+ (m)</label><input id="r-dplus" type="number" value="${r?.dplus_m ?? ''}"></div>
+        <div id="rf-dist-wrap" style="display:${isBY ? 'none' : ''}"><label>Distancia (km)</label><input id="r-dist" type="number" inputmode="decimal" value="${r?.distance_km ?? ''}"></div>
+        <div><label id="r-dplus-label">${isBY ? 'Desnivel por vuelta (m)' : 'D+ (m)'}</label><input id="r-dplus" type="number" inputmode="numeric" value="${r?.dplus_m ?? ''}"></div>
       </div>
-      <label>Límite de tiempo (horas, opcional)</label><input id="r-limit" type="number" value="${r?.time_limit_h ?? ''}">
-      <label>Tu objetivo de tiempo (horas)</label><input id="r-target" type="number" step="0.1" value="${r?.target_time_h ?? ''}" placeholder="ej: 22">
+      <label>Límite de tiempo (horas, opcional)</label><input id="r-limit" type="number" inputmode="decimal" value="${r?.time_limit_h ?? ''}">
+      <label>Tu objetivo de tiempo (horas)</label><input id="r-target" type="number" step="0.1" inputmode="decimal" value="${r?.target_time_h ?? ''}" placeholder="ej: 22">
       <label>Track GPX (opcional — calcula distancia, D+ y perfil automáticamente)</label>
       <input id="r-gpx" type="file" accept=".gpx">
       <div id="r-gpx-preview"></div>
@@ -622,6 +713,12 @@ function raceModal(id) {
     $('#r-gpx').addEventListener('change', handleGpxFile);
     renderAidList();
   });
+}
+function raceSetType(t) {
+  raceModalType = t;
+  $$('#r-type .chip').forEach(c => c.classList.toggle('selected', c.dataset.v === t));
+  $('#rf-dist-wrap').style.display = t === 'backyard' ? 'none' : '';
+  $('#r-dplus-label').textContent = t === 'backyard' ? 'Desnivel por vuelta (m)' : 'D+ (m)';
 }
 function renderAidList() {
   $('#aidList').innerHTML = aidStationsState.map((a, i) => `
@@ -655,8 +752,9 @@ async function handleGpxFile(e) {
 async function saveRace(id) {
   const body = {
     name: $('#r-name').value, date: $('#r-date').value, priority: $('#r-prio').value,
+    type: raceModalType,
     start_time: $('#r-start').value || null,
-    distance_km: $('#r-dist').value ? +$('#r-dist').value : null,
+    distance_km: raceModalType === 'backyard' ? null : ($('#r-dist').value ? +$('#r-dist').value : null),
     dplus_m: $('#r-dplus').value ? +$('#r-dplus').value : null,
     time_limit_h: $('#r-limit').value ? +$('#r-limit').value : null,
     target_time_h: $('#r-target').value ? +$('#r-target').value : null,
@@ -1069,15 +1167,9 @@ async function renderAjustes() {
     </div>
     <div class="card">
       <h2>Disponibilidad semanal</h2>
-      <p class="muted small">Minutos que puedes dedicar cada día (0 = descanso fijo).</p>
-      <div class="avail-grid">
-        ${DIAS.map((d, i) => `<div class="avail-day">
-          <div class="avail-day-label">${d.slice(0, 3)}</div>
-          <input type="number" class="avail" data-i="${i}" value="${s.availability[i]}" min="0" step="5">
-          <div class="avail-day-unit">min</div>
-        </div>`).join('')}
-      </div>
-      <label>Horas máximas por semana</label><input id="s-maxh" type="number" value="${s.max_week_hours}">
+      <p class="muted small">Marca cuándo puedes entrenar cada día: mañana, mediodía, tarde, noche, o un horario a medida (ej: de 6 a 9 y de 17 a 22). Puedes combinar varias franjas el mismo día.</p>
+      <div id="availBlock-ajustes">${(() => { AvailUI.init('ajustes', s.availability_windows || s.availability); return AvailUI.render('ajustes'); })()}</div>
+      <label style="margin-top:10px">Horas máximas por semana</label><input id="s-maxh" type="number" inputmode="numeric" value="${s.max_week_hours}">
     </div>
     <div class="card">
       <label>Día habitual de tirada larga</label>
@@ -1097,9 +1189,9 @@ async function renderAjustes() {
     </div>
     <div class="card">
       <h2>Frecuencia cardiaca y peso</h2>
-      <div class="row"><div><label>FC máxima</label><input id="s-hrmax" type="number" value="${s.hr_max}"></div>
-      <div><label>FC en reposo</label><input id="s-hrrest" type="number" value="${s.hr_rest}"></div></div>
-      <label>Peso (kg)</label><input id="s-weight" type="number" value="${s.weight_kg || 70}">
+      <div class="row"><div><label>FC máxima</label><input id="s-hrmax" type="number" inputmode="numeric" pattern="[0-9]*" value="${s.hr_max}"></div>
+      <div><label>FC en reposo</label><input id="s-hrrest" type="number" inputmode="numeric" pattern="[0-9]*" value="${s.hr_rest}"></div></div>
+      <label>Peso (kg)</label><input id="s-weight" type="number" inputmode="decimal" pattern="[0-9]*" value="${s.weight_kg || 70}">
     </div>
     <button class="primary" style="width:100%" onclick="saveSettings()">Guardar ajustes</button>
     <div class="card" style="margin-top:20px">
@@ -1143,22 +1235,46 @@ async function confirmDeleteAccount() {
     toast('Tu cuenta se ha eliminado.');
   } catch (e) { $('#delAccErr').textContent = e.message || 'Error'; }
 }
+// ---------------- Soporte ----------------
+function supportModal() {
+  openModal(`
+    <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+    <h2>${icon('help')} ¿Necesitas ayuda?</h2>
+    <p class="small muted">Cuéntanos qué te ha pasado — un fallo, algo que no cuadra, una duda — y te contestamos a tu email.</p>
+    <textarea id="support-msg" rows="5" placeholder="Escribe aquí..."></textarea>
+    <p id="support-err" class="small" style="color:var(--danger)"></p>
+    <button class="primary" style="width:100%;margin-top:10px" onclick="sendSupportMessage()">Enviar</button>
+  `, { center: true });
+}
+async function sendSupportMessage() {
+  const message = $('#support-msg').value.trim();
+  $('#support-err').textContent = '';
+  if (!message) { $('#support-err').textContent = 'Escribe algo antes de enviar.'; return; }
+  const btn = event.target; btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    await post('/support', { message });
+    closeModals();
+    toast('Mensaje enviado. Te contestaremos por email.');
+  } catch (e) { $('#support-err').textContent = e.message || 'Error enviando el mensaje'; btn.disabled = false; btn.textContent = 'Enviar'; }
+}
 // ---------------- Suscripción (Stripe) ----------------
 function billingCardHtml(b) {
   if (!b || !b.configured) return '';
-  let status;
-  if (b.status === 'trialing') status = `Prueba gratuita — quedan <strong>${b.trialDaysLeft}</strong> día(s).`;
-  else if (b.status === 'active') status = `Suscripción activa (${b.plan === 'yearly' ? 'anual' : 'mensual'}).`;
-  else if (b.status === 'past_due') status = 'Suscripción con un pago pendiente — revisa tu método de pago.';
-  else status = 'Sin suscripción activa.';
+  const isActive = b.status === 'active';
+  let statusLabel, statusText;
+  if (b.status === 'trialing') { statusLabel = null; statusText = `Prueba gratuita — quedan <strong>${b.trialDaysLeft}</strong> día(s).`; }
+  else if (isActive) { statusLabel = 'Activa'; statusText = `Suscripción ${b.plan === 'yearly' ? 'anual' : 'mensual'}.`; }
+  else if (b.status === 'past_due') { statusLabel = 'Pago pendiente'; statusText = 'Revisa tu método de pago.'; }
+  else { statusLabel = 'Inactiva'; statusText = 'Sin suscripción activa.'; }
   const actions = b.status === 'trialing' || !['active', 'past_due'].includes(b.status)
     ? `<div class="row" style="margin-top:8px">
          <button class="primary" style="width:100%" onclick="Billing.checkout('monthly')">Suscribirme — 9,99 €/mes</button>
        </div>
        <button class="ghost" style="width:100%;margin-top:6px" onclick="Billing.checkout('yearly')">Plan anual — 99,90 €/año (2 meses gratis)</button>`
-    : `<button style="width:100%;margin-top:6px" onclick="Billing.portal()">Gestionar suscripción</button>`;
+    : `<button style="width:100%;margin-top:6px" onclick="Billing.portal()">Gestionar método de pago</button>
+       ${isActive ? `<button class="ghost" style="width:100%;margin-top:6px;color:var(--danger)" onclick="Billing.cancelConfirm('${b.plan === 'yearly' ? 'anual' : 'mensual'}')">Cancelar suscripción</button>` : ''}`;
   return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-    <p class="small muted">${status}</p>
+    <p class="small muted">${statusLabel ? `<span class="pill ${isActive ? 'done' : b.status === 'past_due' ? 'partial' : 'missed'}" style="margin-right:6px">${statusLabel}</span>` : ''}${statusText}</p>
     ${actions}
   </div>`;
 }
@@ -1171,6 +1287,25 @@ const Billing = {
     try { const { url } = await post('/billing/portal', {}); location.href = url; }
     catch (e) { toast('Error: ' + e.message); }
   },
+  cancelConfirm(planLabel) {
+    openModal(`
+      <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+      <h2>Cancelar suscripción</h2>
+      <p class="small muted">Tu suscripción ${planLabel} se cancelará de inmediato. Perderás el acceso a TrailCoach ahora mismo, aunque tus datos y tu plan seguirán guardados por si vuelves a suscribirte.</p>
+      <div class="row" style="margin-top:14px">
+        <button onclick="closeModals()">Seguir suscrito</button>
+        <button class="danger" onclick="Billing.cancel()">Sí, cancelar</button>
+      </div>
+    `, { center: true });
+  },
+  async cancel() {
+    try {
+      await post('/billing/cancel', {});
+      closeModals();
+      toast('Suscripción cancelada.');
+      render(currentTab);
+    } catch (e) { toast('Error: ' + e.message); }
+  },
 };
 function paywallHtml(b) {
   const days = b?.trialDaysLeft || 0;
@@ -1182,7 +1317,8 @@ function paywallHtml(b) {
         <button class="primary" style="width:100%" onclick="Billing.checkout('monthly')">Suscribirme — 9,99 €/mes</button>
       </div>
       <button class="ghost" style="width:100%;margin-top:8px" onclick="Billing.checkout('yearly')">Plan anual — 99,90 €/año (2 meses gratis)</button>
-      <button class="ghost" style="width:100%;margin-top:16px;color:var(--danger)" onclick="deleteAccountModal()">Eliminar mi cuenta</button>
+      <button class="ghost" style="width:100%;margin-top:16px" onclick="supportModal()">${icon('help')} ¿Algún problema? Escríbenos</button>
+      <button class="ghost" style="width:100%;margin-top:6px;color:var(--danger)" onclick="deleteAccountModal()">Eliminar mi cuenta</button>
       <button class="ghost" style="width:100%;margin-top:6px" onclick="logout()">Cerrar sesión</button>
     </div>`;
 }
@@ -1191,10 +1327,11 @@ function showPaywall(b) {
   $('#app').innerHTML = paywallHtml(b);
 }
 async function saveSettings() {
-  const availability = $$('.avail').map(i => +i.value || 0);
+  const availability = AvailUI.minutes('ajustes');
+  const availability_windows = AvailUI.windows('ajustes');
   const modeChip = $('#s-strengthmode .chip.selected');
   await put('/settings', {
-    athlete_name: $('#s-name').value, availability, max_week_hours: +$('#s-maxh').value, long_day: +$('#s-longday').value, b2b_day: +$('#s-b2bday').value,
+    athlete_name: $('#s-name').value, availability, availability_windows, max_week_hours: +$('#s-maxh').value, long_day: +$('#s-longday').value, b2b_day: +$('#s-b2bday').value,
     strength: $('#s-strength').checked, strength_mode: modeChip ? modeChip.dataset.v : 'gym', poles: $('#s-poles').checked,
     hr_max: +$('#s-hrmax').value, hr_rest: +$('#s-hrrest').value, weight_kg: +$('#s-weight').value || 70,
   });
@@ -1257,8 +1394,8 @@ const Onboarding = {
   step: 0,
   data: {
     name: '', last_name: '', birth_date: '', weight_kg: '', height_cm: '',
-    availability: [0, 75, 75, 90, 60, 240, 150], max_week_hours: 14,
-    race_name: '', race_date: '', race_distance_km: '', race_dplus_m: '', race_target_h: '',
+    availability: [0, 75, 75, 90, 60, 240, 150], availability_windows: null, max_week_hours: 14,
+    race_type: 'ultra', race_name: '', race_date: '', race_distance_km: '', race_dplus_m: '', race_target_h: '',
   },
   start(name) {
     this.step = 0;
@@ -1284,8 +1421,8 @@ const Onboarding = {
         <label>Apellidos</label><input id="onb-lastname" value="${esc(d.last_name)}">
         <label>Fecha de nacimiento</label><input id="onb-birth" type="date" value="${d.birth_date || ''}">
         <div class="row">
-          <div><label>Peso actual (kg)</label><input id="onb-weight" type="number" value="${d.weight_kg}"></div>
-          <div><label>Altura (cm)</label><input id="onb-height" type="number" value="${d.height_cm}"></div>
+          <div><label>Peso actual (kg)</label><input id="onb-weight" type="number" inputmode="decimal" pattern="[0-9]*" value="${d.weight_kg}"></div>
+          <div><label>Altura (cm)</label><input id="onb-height" type="number" inputmode="numeric" pattern="[0-9]*" value="${d.height_cm}"></div>
         </div>
       </div>
       <div class="onb-actions"><button class="primary" style="width:100%" onclick="Onboarding.next()">Siguiente</button></div>
@@ -1293,12 +1430,13 @@ const Onboarding = {
   },
   renderDisponibilidad() {
     const d = this.data;
+    AvailUI.init('onb', d.availability_windows || d.availability);
     return `
       <div class="onb-step">
         <h2>Tu disponibilidad</h2>
-        <p class="muted small onb-sub">Es orientativo: podrás cambiarlo cuando quieras desde Ajustes. Minutos que puedes dedicar cada día (0 = descanso fijo).</p>
-        ${DIAS.map((day, i) => `<label>${day}</label><input type="number" class="onb-avail" data-i="${i}" value="${d.availability[i]}">`).join('')}
-        <label>Horas máximas por semana</label><input id="onb-maxh" type="number" value="${d.max_week_hours}">
+        <p class="muted small onb-sub">Es orientativo: podrás cambiarlo cuando quieras desde Ajustes. Marca mañana, mediodía, tarde, noche, o un horario a medida (ej: de 6 a 9 y de 17 a 22) — puedes combinar varias franjas el mismo día.</p>
+        <div id="availBlock-onb">${AvailUI.render('onb')}</div>
+        <label style="margin-top:10px">Horas máximas por semana</label><input id="onb-maxh" type="number" inputmode="numeric" value="${d.max_week_hours}">
       </div>
       <div class="onb-actions">
         <button onclick="Onboarding.back()">Atrás</button>
@@ -1308,17 +1446,27 @@ const Onboarding = {
   },
   renderObjetivo() {
     const d = this.data;
+    const isBY = d.race_type === 'backyard';
     return `
       <div class="onb-step">
         <h2>Tu objetivo</h2>
         <p class="muted small onb-sub">¿Qué carrera quieres preparar? Puedes dejarlo en blanco y añadirlo luego desde Plan → Carreras.</p>
-        <label>Nombre de la carrera</label><input id="onb-rname" value="${esc(d.race_name)}" placeholder="ej: CDH 110K - Val d'Aran by UTMB">
-        <label>Fecha</label><input id="onb-rdate" type="date" value="${d.race_date}">
-        <div class="row">
-          <div><label>Distancia (km)</label><input id="onb-rdist" type="number" value="${d.race_distance_km}"></div>
-          <div><label>D+ (m)</label><input id="onb-rdplus" type="number" value="${d.race_dplus_m}"></div>
+        <label>Nombre de la carrera</label><input id="onb-rname" value="${esc(d.race_name)}" placeholder="Nombre de la carrera">
+        <div class="chip-row" style="margin:8px 0 4px">
+          <div class="chip ${!isBY ? 'selected' : ''}" onclick="Onboarding.setRaceType('ultra')">Carrera de ultra</div>
+          <div class="chip ${isBY ? 'selected' : ''}" onclick="Onboarding.setRaceType('backyard')">Backyard Ultra</div>
         </div>
-        <label>Tu objetivo de tiempo (horas, opcional)</label><input id="onb-rtarget" type="number" step="0.1" value="${d.race_target_h}" placeholder="ej: 22">
+        <label>Fecha</label><input id="onb-rdate" type="date" value="${d.race_date}">
+        ${isBY ? `
+        <label>Desnivel por vuelta (m)</label><input id="onb-rdplus" type="number" inputmode="numeric" value="${d.race_dplus_m}">
+        <label>Tu objetivo (horas)</label><input id="onb-rtarget" type="number" step="0.1" inputmode="decimal" value="${d.race_target_h}" placeholder="ej: 24">
+        ` : `
+        <div class="row">
+          <div><label>Distancia (km)</label><input id="onb-rdist" type="number" inputmode="decimal" value="${d.race_distance_km}"></div>
+          <div><label>D+ (m)</label><input id="onb-rdplus" type="number" inputmode="numeric" value="${d.race_dplus_m}"></div>
+        </div>
+        <label>Tu objetivo de tiempo (horas, opcional)</label><input id="onb-rtarget" type="number" step="0.1" inputmode="decimal" value="${d.race_target_h}" placeholder="ej: 22">
+        `}
       </div>
       <div class="onb-actions">
         <button onclick="Onboarding.back()">Atrás</button>
@@ -1326,16 +1474,27 @@ const Onboarding = {
       </div>
     `;
   },
+  setRaceType(t) {
+    const d = this.data;
+    if ($('#onb-rname')) d.race_name = $('#onb-rname').value.trim();
+    if ($('#onb-rdate')) d.race_date = $('#onb-rdate').value;
+    if ($('#onb-rdist')) d.race_distance_km = $('#onb-rdist').value;
+    if ($('#onb-rdplus')) d.race_dplus_m = $('#onb-rdplus').value;
+    if ($('#onb-rtarget')) d.race_target_h = $('#onb-rtarget').value;
+    d.race_type = t;
+    $('#onbContent').innerHTML = this.renderObjetivo();
+  },
   collect() {
     const d = this.data, step = this.steps[this.step];
     if (step === 'perfil') {
       d.name = $('#onb-name').value.trim(); d.last_name = $('#onb-lastname').value.trim();
       d.birth_date = $('#onb-birth').value || null; d.weight_kg = $('#onb-weight').value; d.height_cm = $('#onb-height').value;
     } else if (step === 'disponibilidad') {
-      d.availability = $$('.onb-avail').map(i => +i.value || 0); d.max_week_hours = $('#onb-maxh').value;
+      d.availability = AvailUI.minutes('onb'); d.availability_windows = AvailUI.windows('onb'); d.max_week_hours = $('#onb-maxh').value;
     } else if (step === 'objetivo') {
       d.race_name = $('#onb-rname').value.trim(); d.race_date = $('#onb-rdate').value;
-      d.race_distance_km = $('#onb-rdist').value; d.race_dplus_m = $('#onb-rdplus').value; d.race_target_h = $('#onb-rtarget').value;
+      d.race_dplus_m = $('#onb-rdplus').value; d.race_target_h = $('#onb-rtarget').value;
+      d.race_distance_km = d.race_type === 'backyard' ? '' : $('#onb-rdist').value;
     }
   },
   next() { this.collect(); this.step++; this.render(); },
@@ -1348,13 +1507,13 @@ const Onboarding = {
       await put('/settings', {
         athlete_name: d.name, last_name: d.last_name, birth_date: d.birth_date || null,
         weight_kg: +d.weight_kg || 70, height_cm: d.height_cm ? +d.height_cm : null,
-        availability: d.availability, max_week_hours: +d.max_week_hours || 14,
+        availability: d.availability, availability_windows: d.availability_windows, max_week_hours: +d.max_week_hours || 14,
         onboarding_done: true,
       });
       if (d.race_name && d.race_date) {
         await post('/races', {
-          name: d.race_name, date: d.race_date, priority: 'A',
-          distance_km: d.race_distance_km ? +d.race_distance_km : null,
+          name: d.race_name, date: d.race_date, priority: 'A', type: d.race_type,
+          distance_km: d.race_type === 'backyard' ? null : (d.race_distance_km ? +d.race_distance_km : null),
           dplus_m: d.race_dplus_m ? +d.race_dplus_m : null,
           target_time_h: d.race_target_h ? +d.race_target_h : null,
         });

@@ -48,8 +48,9 @@ label { display: block; font-size: .82rem; color: var(--muted); margin: .6em 0 .
 .brand { display: flex; align-items: center; gap: .55em; font-weight: 700; letter-spacing: -.01em; }
 .brand img { width: 26px; height: 26px; display: block; }
 .brand small { display: block; font-size: .68rem; font-weight: 500; color: var(--muted); letter-spacing: .02em; margin-top: -1px; }
-.profile-btn { width: 34px; height: 34px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--panel2); border: 1px solid var(--border); color: var(--muted); }
-.profile-btn .icon { width: 18px; height: 18px; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.profile-btn, .support-btn { width: 34px; height: 34px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--panel2); border: 1px solid var(--border); color: var(--muted); }
+.profile-btn .icon, .support-btn .icon { width: 18px; height: 18px; }
 .profile-btn.has-photo { background-size: cover; background-position: center; border-color: var(--accent); }
 .theme-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
 .theme-toggle button { border: none; border-radius: 0; background: transparent; padding: .5em 1em; display: flex; align-items: center; gap: .4em; }
@@ -70,14 +71,18 @@ label { display: block; font-size: .82rem; color: var(--muted); margin: .6em 0 .
 }
 .avatar-edit-dot svg { width: 13px; height: 13px; color: #0e1512; }
 
-/* Disponibilidad semanal: grid visual en vez de lista apilada */
-.avail-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0 14px; }
-.avail-day { display: flex; flex-direction: column; align-items: center; gap: 2px; background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 8px 4px; }
-.avail-day-label { font-size: .72rem; font-weight: 700; text-transform: uppercase; color: var(--muted); letter-spacing: .03em; }
-.avail-day input.avail { width: 100%; text-align: center; padding: .3em 0; margin: 2px 0 0; background: transparent; border: none; font-size: 1rem; font-weight: 700; -moz-appearance: textfield; }
-.avail-day input.avail::-webkit-outer-spin-button, .avail-day input.avail::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.avail-day-unit { font-size: .68rem; color: var(--muted); }
-@media (min-width: 480px) { .avail-grid { grid-template-columns: repeat(7, 1fr); } }
+/* Disponibilidad semanal: franjas horarias por día (presets + horario a medida) */
+.avail-day-block { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+.avail-day-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.avail-day-head strong { font-size: .9rem; }
+.avail-rest { color: var(--danger); }
+.avail-ranges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.avail-range-chip { display: inline-flex; align-items: center; gap: 4px; padding: .3em .5em .3em .7em; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); font-size: .82rem; font-weight: 600; }
+.avail-range-chip button { display: flex; padding: 2px; background: none; border: none; color: var(--muted); cursor: pointer; }
+.avail-range-chip button .icon { width: 12px; height: 12px; }
+.avail-custom-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.avail-custom-row input[type="time"] { width: auto; flex: 1; }
+.avail-custom-row button { flex: 0 0 auto; }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
 .card.tight { padding: 10px 12px; }
 .muted { color: var(--muted); }

@@ -67,6 +67,9 @@
     <p class="small muted" style="text-align:center;margin-top:16px">
       <a href="/terms.html" target="_blank">Términos de uso</a> · <a href="/privacy.html" target="_blank">Privacidad</a>
     </p>
+    <p class="small muted" style="text-align:center;margin-top:6px">
+      ¿Algún problema para entrar? <a href="mailto:martialonso@anuklab.com">Escríbenos</a>
+    </p>
   </div>
 </div>
 
@@ -82,7 +85,10 @@
   <div class="topbar">
     <div class="container">
       <div class="brand"><img src="/icons/logo-mark-128.png" alt="TrailCoach"></div>
-      <button class="ghost profile-btn" onclick="switchTab('ajustes')" aria-label="Perfil y ajustes"></button>
+      <div class="topbar-actions">
+        <button class="ghost support-btn" onclick="supportModal()" aria-label="Ayuda y soporte"></button>
+        <button class="ghost profile-btn" onclick="switchTab('ajustes')" aria-label="Perfil y ajustes"></button>
+      </div>
     </div>
   </div>
 
