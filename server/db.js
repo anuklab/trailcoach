@@ -50,7 +50,6 @@ CREATE TABLE IF NOT EXISTS races (
   date_confirmed INTEGER DEFAULT 1,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_races_user ON races(user_id);
 
 CREATE TABLE IF NOT EXISTS past_races (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,7 +58,6 @@ CREATE TABLE IF NOT EXISTS past_races (
   distance_km REAL, dplus_m REAL, time_min REAL,
   position TEXT, notes TEXT, strava_id INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_past_races_user ON past_races(user_id);
 
 -- id = id de la actividad en Strava (globalmente único entre todas las cuentas de Strava),
 -- o negativo si es manual. user_id identifica de quién es dentro de TrailCoach.
@@ -73,7 +71,6 @@ CREATE TABLE IF NOT EXISTS activities (
   suffer_score REAL, load REAL,
   raw TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_act_user_date ON activities(user_id, date);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +90,6 @@ CREATE TABLE IF NOT EXISTS sessions (
   change_note TEXT,
   original TEXT            -- JSON de la sesión antes de modificarla
 );
-CREATE INDEX IF NOT EXISTS idx_sess_user_date ON sessions(user_id, date);
 
 CREATE TABLE IF NOT EXISTS checkins (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,7 +99,6 @@ CREATE TABLE IF NOT EXISTS checkins (
   available_min INTEGER, note TEXT,
   result TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_checkins_user_date ON checkins(user_id, date);
 
 CREATE TABLE IF NOT EXISTS changelog (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,7 +106,6 @@ CREATE TABLE IF NOT EXISTS changelog (
   at TEXT DEFAULT CURRENT_TIMESTAMP,
   source TEXT, summary TEXT, detail TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_changelog_user ON changelog(user_id);
 
 CREATE TABLE IF NOT EXISTS nutrition_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,7 +120,6 @@ CREATE TABLE IF NOT EXISTS nutrition_logs (
   notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_nutri_user_date ON nutrition_logs(user_id, date);
 `);
 
 // Migraciones ligeras: añade columnas nuevas si la base de datos ya existía sin ellas
@@ -143,6 +136,19 @@ for (const t of ['races', 'past_races', 'activities', 'sessions', 'checkins', 'n
 }
 ensureColumn('changelog', 'user_id', 'INTEGER');
 ensureColumn('users', 'strava_last_sync', 'TEXT');
+
+// Los índices por user_id se crean aquí, después de las migraciones, para garantizar
+// que la columna ya existe (en una base de datos previa a multiusuario, no existía
+// todavía cuando se ejecutaba el bloque de creación de tablas de más arriba).
+db.exec(`
+CREATE INDEX IF NOT EXISTS idx_races_user ON races(user_id);
+CREATE INDEX IF NOT EXISTS idx_past_races_user ON past_races(user_id);
+CREATE INDEX IF NOT EXISTS idx_act_user_date ON activities(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_sess_user_date ON sessions(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_checkins_user_date ON checkins(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_changelog_user ON changelog(user_id);
+CREATE INDEX IF NOT EXISTS idx_nutri_user_date ON nutrition_logs(user_id, date);
+`);
 
 // ---------- Autenticación ----------
 // scrypt (nativo en Node, sin dependencias externas) para el hash de contraseñas.
