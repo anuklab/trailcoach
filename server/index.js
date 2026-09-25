@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, getSettings, setSettings, log, createUser, getUserByEmail, getUserById, verifyPassword, getAvatar, setAvatar, setPassword, deleteUser, createPasswordReset, consumePasswordReset, billingAccess } from './db.js';
 import { sendMail } from './mailer.js';
-import { billingConfigured, createCheckoutSession, createPortalSession, handleWebhookEvent } from './billing.js';
+import { billingConfigured, createCheckoutSession, createPortalSession, cancelSubscription, handleWebhookEvent } from './billing.js';
 import { today, addDays, mondayOf, diffDays } from './util.js';
 import { parseGpx } from './gpx.js';
 import { generatePlan, weeksOverview, estimateRaceHours, racesFor, targetFeasibility } from './planner.js';
@@ -145,7 +145,7 @@ app.use('/api', (req, res, next) => {
   // Si la prueba gratuita terminó y no hay suscripción activa, bloqueamos el resto de la app —
   // pero dejamos pasar lo mínimo para que la persona pueda ver su estado, suscribirse, gestionar
   // el pago, borrar su cuenta o cambiar la contraseña incluso estando bloqueada.
-  const allowlist = ['/me', '/billing/checkout', '/billing/portal', '/account'];
+  const allowlist = ['/me', '/billing/checkout', '/billing/portal', '/billing/cancel', '/account', '/support'];
   if (billingConfigured() && !billingAccess(user).allowed && !allowlist.includes(req.path)) {
     return res.status(402).json({ error: 'Tu periodo de prueba ha terminado. Suscríbete para seguir usando TrailCoach.', billing: billingAccess(user) });
   }
@@ -176,6 +176,13 @@ app.post('/api/billing/portal', wrap(async (req, res) => {
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   const url = await createPortalSession(user, baseUrl);
   res.json({ url });
+}));
+app.post('/api/billing/cancel', wrap(async (req, res) => {
+  const user = getUserById(req.userId);
+  await cancelSubscription(user);
+  db.prepare(`UPDATE users SET subscription_status='canceled' WHERE id=?`).run(req.userId);
+  log(req.userId, 'billing', 'Suscripción cancelada desde la app');
+  res.json(publicUser(getUserById(req.userId)));
 }));
 
 // ---------- Hoy / resumen ----------
@@ -244,8 +251,9 @@ app.post('/api/adjust/ask', wrap(async (req, res) => res.json(await naturalAdjus
 app.get('/api/races', wrap((req, res) => res.json(racesFor(req.userId))));
 app.post('/api/races', wrap((req, res) => {
   const r = req.body;
-  const info = db.prepare(`INSERT INTO races(user_id,name,date,priority,distance_km,dplus_m,dminus_m,time_limit_h,target_time_h,start_time,profile,climbs,aid_stations,notes)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.userId, r.name, r.date, r.priority || 'A', r.distance_km || null, r.dplus_m || null,
+  const info = db.prepare(`INSERT INTO races(user_id,name,date,priority,type,distance_km,dplus_m,dminus_m,time_limit_h,target_time_h,start_time,profile,climbs,aid_stations,notes)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.userId, r.name, r.date, r.priority || 'A', r.type === 'backyard' ? 'backyard' : 'ultra',
+    r.distance_km || null, r.dplus_m || null,
     r.dminus_m || null, r.time_limit_h || null, r.target_time_h || null, r.start_time || null,
     r.profile ? JSON.stringify(r.profile) : null, r.climbs ? JSON.stringify(r.climbs) : null,
     r.aid_stations ? JSON.stringify(r.aid_stations) : null, r.notes || null);
@@ -255,8 +263,9 @@ app.patch('/api/races/:id', wrap((req, res) => {
   const r = req.body; const cur = db.prepare('SELECT * FROM races WHERE id=? AND user_id=?').get(req.params.id, req.userId);
   if (!cur) return res.status(404).json({ error: 'No encontrada' });
   const merged = { ...cur, ...r };
-  db.prepare(`UPDATE races SET name=?,date=?,priority=?,distance_km=?,dplus_m=?,dminus_m=?,time_limit_h=?,target_time_h=?,start_time=?,profile=?,climbs=?,aid_stations=?,notes=? WHERE id=? AND user_id=?`)
-    .run(merged.name, merged.date, merged.priority, merged.distance_km, merged.dplus_m, merged.dminus_m, merged.time_limit_h,
+  db.prepare(`UPDATE races SET name=?,date=?,priority=?,type=?,distance_km=?,dplus_m=?,dminus_m=?,time_limit_h=?,target_time_h=?,start_time=?,profile=?,climbs=?,aid_stations=?,notes=? WHERE id=? AND user_id=?`)
+    .run(merged.name, merged.date, merged.priority, merged.type === 'backyard' ? 'backyard' : 'ultra',
+      merged.distance_km, merged.dplus_m, merged.dminus_m, merged.time_limit_h,
       merged.target_time_h, merged.start_time,
       typeof merged.profile === 'string' ? merged.profile : JSON.stringify(merged.profile),
       typeof merged.climbs === 'string' ? merged.climbs : JSON.stringify(merged.climbs),
@@ -331,15 +340,34 @@ app.put('/api/avatar', wrap((req, res) => {
   res.json({ avatar: data || null });
 }));
 
+// Soporte: la persona escribe qué le pasa y se lo mandamos por correo a quien lleve la app. No
+// bloqueado por el candado de suscripción (allowlist arriba) — si algo va mal con el pago, tiene
+// que poder escribir igualmente.
+app.post('/api/support', rateLimit('support', 10, 15 * 60 * 1000), wrap(async (req, res) => {
+  const user = getUserById(req.userId);
+  const message = String(req.body?.message || '').trim();
+  if (!message) return res.status(400).json({ error: 'Escribe tu mensaje antes de enviarlo.' });
+  const to = process.env.SUPPORT_EMAIL || 'martialonso@anuklab.com';
+  const result = await sendMail({
+    to, subject: `[TrailCoach] Soporte — ${user.name || user.email}`,
+    text: `De: ${user.name || '(sin nombre)'} <${user.email}> (usuario #${user.id})\n\n${message}`,
+  });
+  log(req.userId, 'support', 'Mensaje de soporte enviado', { sent: result.sent });
+  res.json({ ok: true, sent: result.sent });
+}));
+
 // Borrado de cuenta (derecho a la supresión, RGPD): pide la contraseña actual como confirmación.
 // Las claves foráneas ON DELETE CASCADE se llevan por delante todos los datos del usuario
 // (carreras, actividades, sesiones, check-ins, nutrición, tokens de recuperación).
-app.delete('/api/account', wrap((req, res) => {
+app.delete('/api/account', wrap(async (req, res) => {
   const user = getUserById(req.userId);
   const password = String(req.body?.password || '');
   // 403, no 401: un 401 aquí haría que el cliente interprete que la sesión ha caducado y cierre
   // sesión sola — el problema no es la sesión, es que la contraseña escrita en el modal es incorrecta.
   if (!verifyPassword(password, user.password_hash)) return res.status(403).json({ error: 'Contraseña incorrecta' });
+  // Si tiene una suscripción de Stripe activa, la cancelamos antes de borrar la cuenta — si no,
+  // Stripe seguiría cobrando a una tarjeta cuyo dueño ya no tendría cuenta con la que gestionarla.
+  try { await cancelSubscription(user); } catch (e) { console.error('[billing] Error cancelando suscripción al borrar cuenta:', e.message); }
   deleteUser(req.userId);
   res.json({ ok: true });
 }));

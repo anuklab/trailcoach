@@ -46,6 +46,9 @@ export async function createCheckoutSession(user, plan, baseUrl) {
     subscription_data: trialDaysLeft ? { trial_period_days: trialDaysLeft } : undefined,
     success_url: `${baseUrl}/?billing=ok`,
     cancel_url: `${baseUrl}/?billing=cancelled`,
+    // Managed Payments viene activado por defecto en cuentas nuevas de Stripe y exige que el
+    // producto tenga un tax_code configurado; como no usamos Stripe Tax, lo desactivamos aquí
+    // para que el checkout funcione sin tener que clasificar fiscalmente el producto.
     managed_payments: { enabled: false },
   });
   return session.url;
@@ -58,6 +61,20 @@ export async function createPortalSession(user, baseUrl) {
   if (!user.stripe_customer_id) throw new Error('Todavía no tienes una suscripción que gestionar.');
   const session = await s.billingPortal.sessions.create({ customer: user.stripe_customer_id, return_url: `${baseUrl}/` });
   return session.url;
+}
+
+// Cancela la suscripción de Stripe inmediatamente (no al final del periodo). Se usa tanto desde
+// el botón "Cancelar suscripción" como al borrar la cuenta — si no se cancela aquí, Stripe seguiría
+// cobrando a una tarjeta cuyo dueño ya no tiene ninguna cuenta en la app con la que gestionarla.
+export async function cancelSubscription(user) {
+  const s = client();
+  if (!s || !user.stripe_subscription_id) return null;
+  try { return await s.subscriptions.cancel(user.stripe_subscription_id); }
+  catch (e) {
+    // Si Stripe ya no la conoce (borrada a mano, ya cancelada...) no bloqueamos la operación local.
+    if (e?.code === 'resource_missing') return null;
+    throw e;
+  }
 }
 
 function planFromPriceId(priceId) {

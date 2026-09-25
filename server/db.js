@@ -141,6 +141,10 @@ function ensureColumn(table, col, decl) {
 ensureColumn('races', 'target_time_h', 'REAL');
 ensureColumn('races', 'aid_stations', 'TEXT');
 ensureColumn('races', 'start_time', 'TEXT');
+// Tipo de carrera: 'ultra' (distancia + desnivel fijos) o 'backyard' (vueltas de una hora a un
+// desnivel/distancia fijo por vuelta, hasta quedar el/la última en pie — "Last Man Standing").
+// En una backyard, dplus_m se reutiliza para guardar el D+ de una sola vuelta, no el total.
+ensureColumn('races', 'type', "TEXT DEFAULT 'ultra'");
 for (const t of ['races', 'past_races', 'activities', 'sessions', 'checkins', 'nutrition_logs']) {
   ensureColumn(t, 'user_id', 'INTEGER');
 }
@@ -229,8 +233,11 @@ export function consumePasswordReset(token) {
 }
 
 export const DEFAULT_SETTINGS = {
-  // minutos disponibles por día (lunes..domingo)
+  // minutos disponibles por día (lunes..domingo) — lo usa el planificador
   availability: [0, 75, 75, 90, 60, 240, 150],
+  // franjas horarias por día (lunes..domingo), cada una [{s:'HH:MM', e:'HH:MM'}, ...]; de aquí
+  // se calculan los minutos de `availability`. null = todavía no configurado por franjas.
+  availability_windows: null,
   long_day: 5,          // 0=lunes .. 6=domingo
   b2b_day: 6,
   max_week_hours: 14,
