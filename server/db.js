@@ -151,6 +151,12 @@ ensureColumn('checkins', 'wants_session', 'INTEGER'); // el atleta pide entrenar
 // Foto de perfil: se guarda aparte de `settings` (que se lee/fusiona en casi cada petición)
 // para no cargar una imagen en cada llamada que solo necesita los ajustes normales.
 ensureColumn('users', 'avatar_data', 'TEXT');
+// Suscripción (Stripe): cada cuenta nueva arranca con 14 días de prueba sin pedir tarjeta.
+ensureColumn('users', 'stripe_customer_id', 'TEXT');
+ensureColumn('users', 'stripe_subscription_id', 'TEXT');
+ensureColumn('users', 'subscription_status', "TEXT DEFAULT 'trialing'"); // trialing, active, past_due, canceled
+ensureColumn('users', 'subscription_plan', 'TEXT'); // monthly, yearly
+ensureColumn('users', 'trial_ends_at', 'TEXT');
 
 // Los índices por user_id se crean aquí, después de las migraciones, para garantizar
 // que la columna ya existe (en una base de datos previa a multiusuario, no existía
@@ -181,9 +187,12 @@ export function verifyPassword(password, stored) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+const TRIAL_DAYS = 14;
 export function createUser({ email, password, name }) {
-  const info = db.prepare('INSERT INTO users(email, password_hash, name) VALUES (?,?,?)')
-    .run(String(email).trim().toLowerCase(), hashPassword(password), name || null);
+  const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const info = db.prepare(`INSERT INTO users(email, password_hash, name, subscription_status, trial_ends_at)
+    VALUES (?,?,?,'trialing',?)`)
+    .run(String(email).trim().toLowerCase(), hashPassword(password), name || null, trialEndsAt);
   return getUserById(info.lastInsertRowid);
 }
 export function getUserByEmail(email) {
@@ -257,6 +266,32 @@ export function getAvatar(userId) {
 }
 export function setAvatar(userId, dataUrl) {
   db.prepare('UPDATE users SET avatar_data = ? WHERE id = ?').run(dataUrl || null, userId);
+}
+
+// ---------- Suscripción (Stripe) ----------
+export function setStripeCustomer(userId, customerId) {
+  db.prepare('UPDATE users SET stripe_customer_id = ? WHERE id = ?').run(customerId, userId);
+}
+export function setSubscription(userId, { subscriptionId, status, plan }) {
+  db.prepare('UPDATE users SET stripe_subscription_id = ?, subscription_status = ?, subscription_plan = ? WHERE id = ?')
+    .run(subscriptionId || null, status, plan || null, userId);
+}
+export function getUserByStripeCustomer(customerId) {
+  return db.prepare('SELECT * FROM users WHERE stripe_customer_id = ?').get(customerId);
+}
+// ¿Puede este usuario seguir usando la app? true durante la prueba gratuita (14 días desde el
+// alta) o con una suscripción activa/en periodo de gracia por impago; false si la prueba caducó
+// y no hay suscripción, o si la suscripción se canceló.
+export function billingAccess(user) {
+  const trialActive = user.subscription_status === 'trialing' && user.trial_ends_at && user.trial_ends_at > new Date().toISOString();
+  const subActive = ['active', 'past_due'].includes(user.subscription_status);
+  return {
+    allowed: trialActive || subActive,
+    status: user.subscription_status,
+    plan: user.subscription_plan,
+    trialEndsAt: user.trial_ends_at,
+    trialDaysLeft: trialActive ? Math.max(0, Math.ceil((new Date(user.trial_ends_at) - Date.now()) / 86400000)) : 0,
+  };
 }
 
 export function getKV(key, fallback = null) {

@@ -2,8 +2,9 @@ import express from 'express';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, getSettings, setSettings, log, createUser, getUserByEmail, getUserById, verifyPassword, getAvatar, setAvatar, setPassword, deleteUser, createPasswordReset, consumePasswordReset } from './db.js';
+import { db, getSettings, setSettings, log, createUser, getUserByEmail, getUserById, verifyPassword, getAvatar, setAvatar, setPassword, deleteUser, createPasswordReset, consumePasswordReset, billingAccess } from './db.js';
 import { sendMail } from './mailer.js';
+import { billingConfigured, createCheckoutSession, createPortalSession, handleWebhookEvent } from './billing.js';
 import { today, addDays, mondayOf, diffDays } from './util.js';
 import { parseGpx } from './gpx.js';
 import { generatePlan, weeksOverview, estimateRaceHours, racesFor, targetFeasibility } from './planner.js';
@@ -18,6 +19,19 @@ import { estimateVO2max } from './vo2.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+
+// Webhook de Stripe: tiene que registrarse ANTES de express.json() porque la verificación de la
+// firma necesita el cuerpo crudo (sin parsear) de la petición, byte a byte.
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const result = await handleWebhookEvent(req.body, req.headers['stripe-signature']);
+    res.json({ received: true, type: result.type });
+  } catch (e) {
+    console.error('[Stripe webhook]', e.message);
+    res.status(400).json({ error: `Webhook error: ${e.message}` });
+  }
+});
+
 app.use(express.json({ limit: '15mb' }));
 
 // ---------- Autenticación (cada persona tiene su propia cuenta) ----------
@@ -48,7 +62,13 @@ function verifyState(s) {
   return Number.isInteger(uid) ? uid : null;
 }
 
-function publicUser(u) { return { id: u.id, email: u.email, name: u.name || null, avatar: u.avatar_data || null }; }
+function publicUser(u) {
+  const billing = billingAccess(u);
+  return {
+    id: u.id, email: u.email, name: u.name || null, avatar: u.avatar_data || null,
+    billing: { ...billing, configured: billingConfigured() },
+  };
+}
 
 // Limitador de intentos muy simple, sin dependencias: protege login/signup/recuperación de
 // contraseña de fuerza bruta. En memoria (por proceso) — suficiente para un servidor propio de
@@ -119,8 +139,16 @@ app.use('/api', (req, res, next) => {
   if (['/login', '/signup', '/password/forgot', '/password/reset'].includes(req.path) || req.path.startsWith('/strava/callback')) return next();
   const t = req.headers.authorization?.replace('Bearer ', '');
   const uid = verifyToken(t);
-  if (!uid || !getUserById(uid)) return res.status(401).json({ error: 'No autenticado' });
+  const user = uid ? getUserById(uid) : null;
+  if (!uid || !user) return res.status(401).json({ error: 'No autenticado' });
   req.userId = uid;
+  // Si la prueba gratuita terminó y no hay suscripción activa, bloqueamos el resto de la app —
+  // pero dejamos pasar lo mínimo para que la persona pueda ver su estado, suscribirse, gestionar
+  // el pago, borrar su cuenta o cambiar la contraseña incluso estando bloqueada.
+  const allowlist = ['/me', '/billing/checkout', '/billing/portal', '/account'];
+  if (billingConfigured() && !billingAccess(user).allowed && !allowlist.includes(req.path)) {
+    return res.status(402).json({ error: 'Tu periodo de prueba ha terminado. Suscríbete para seguir usando TrailCoach.', billing: billingAccess(user) });
+  }
   next();
 });
 
@@ -133,6 +161,21 @@ app.get('/api/me', wrap((req, res) => {
   const user = getUserById(req.userId);
   if (!user) return res.status(404).json({ error: 'No encontrado' });
   res.json(publicUser(user));
+}));
+
+// ---------- Suscripción (Stripe) ----------
+app.post('/api/billing/checkout', wrap(async (req, res) => {
+  const user = getUserById(req.userId);
+  const plan = req.body?.plan === 'yearly' ? 'yearly' : 'monthly';
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const url = await createCheckoutSession(user, plan, baseUrl);
+  res.json({ url });
+}));
+app.post('/api/billing/portal', wrap(async (req, res) => {
+  const user = getUserById(req.userId);
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const url = await createPortalSession(user, baseUrl);
+  res.json({ url });
 }));
 
 // ---------- Hoy / resumen ----------

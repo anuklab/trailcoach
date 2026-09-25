@@ -131,6 +131,7 @@ async function api(path, opts = {}) {
   if (r.status === 401) { Auth.token = null; localStorage.removeItem('tc_token'); showLogin(); throw new Error('No autenticado'); }
   const isJson = (r.headers.get('content-type') || '').includes('json');
   const d = isJson ? await r.json() : await r.text();
+  if (r.status === 402) { showPaywall(d.billing); throw new Error(d.error || 'Suscripción requerida'); }
   if (!r.ok) throw new Error((d && d.error) || 'Error de red');
   return d;
 }
@@ -1104,6 +1105,7 @@ async function renderAjustes() {
     <div class="card" style="margin-top:20px">
       <h2>Cuenta</h2>
       <p class="small muted">Conectado como <strong>${esc(me.email)}</strong></p>
+      ${billingCardHtml(me.billing)}
       <button class="danger" style="width:100%;margin-top:6px" onclick="logout()">Cerrar sesión</button>
       <button class="ghost" style="width:100%;margin-top:8px;color:var(--danger)" onclick="deleteAccountModal()">Eliminar mi cuenta</button>
     </div>
@@ -1140,6 +1142,53 @@ async function confirmDeleteAccount() {
     showLogin();
     toast('Tu cuenta se ha eliminado.');
   } catch (e) { $('#delAccErr').textContent = e.message || 'Error'; }
+}
+// ---------------- Suscripción (Stripe) ----------------
+function billingCardHtml(b) {
+  if (!b || !b.configured) return '';
+  let status;
+  if (b.status === 'trialing') status = `Prueba gratuita — quedan <strong>${b.trialDaysLeft}</strong> día(s).`;
+  else if (b.status === 'active') status = `Suscripción activa (${b.plan === 'yearly' ? 'anual' : 'mensual'}).`;
+  else if (b.status === 'past_due') status = 'Suscripción con un pago pendiente — revisa tu método de pago.';
+  else status = 'Sin suscripción activa.';
+  const actions = b.status === 'trialing' || !['active', 'past_due'].includes(b.status)
+    ? `<div class="row" style="margin-top:8px">
+         <button class="primary" style="width:100%" onclick="Billing.checkout('monthly')">Suscribirme — 9,99 €/mes</button>
+       </div>
+       <button class="ghost" style="width:100%;margin-top:6px" onclick="Billing.checkout('yearly')">Plan anual — 99,90 €/año (2 meses gratis)</button>`
+    : `<button style="width:100%;margin-top:6px" onclick="Billing.portal()">Gestionar suscripción</button>`;
+  return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+    <p class="small muted">${status}</p>
+    ${actions}
+  </div>`;
+}
+const Billing = {
+  async checkout(plan) {
+    try { const { url } = await post('/billing/checkout', { plan }); location.href = url; }
+    catch (e) { toast('Error: ' + e.message); }
+  },
+  async portal() {
+    try { const { url } = await post('/billing/portal', {}); location.href = url; }
+    catch (e) { toast('Error: ' + e.message); }
+  },
+};
+function paywallHtml(b) {
+  const days = b?.trialDaysLeft || 0;
+  return `
+    <div class="card" style="max-width:420px;margin:40px auto;text-align:center">
+      <h2>Tu prueba gratuita ha terminado</h2>
+      <p class="small muted">Suscríbete para seguir entrenando con TrailCoach. Tus datos y tu plan siguen aquí, esperándote.</p>
+      <div class="row" style="margin-top:16px">
+        <button class="primary" style="width:100%" onclick="Billing.checkout('monthly')">Suscribirme — 9,99 €/mes</button>
+      </div>
+      <button class="ghost" style="width:100%;margin-top:8px" onclick="Billing.checkout('yearly')">Plan anual — 99,90 €/año (2 meses gratis)</button>
+      <button class="ghost" style="width:100%;margin-top:16px;color:var(--danger)" onclick="deleteAccountModal()">Eliminar mi cuenta</button>
+      <button class="ghost" style="width:100%;margin-top:6px" onclick="logout()">Cerrar sesión</button>
+    </div>`;
+}
+function showPaywall(b) {
+  $('#login').style.display = 'none'; $('#onboarding').style.display = 'none'; $('#app').style.display = 'block';
+  $('#app').innerHTML = paywallHtml(b);
 }
 async function saveSettings() {
   const availability = $$('.avail').map(i => +i.value || 0);
@@ -1374,6 +1423,12 @@ async function boot() {
   let me;
   try { me = await get('/me'); }
   catch (e) { showLogin(); return; }
+  const billingParam = new URLSearchParams(location.search).get('billing');
+  if (billingParam) {
+    history.replaceState(null, '', location.pathname);
+    if (billingParam === 'ok') toast('¡Gracias! Tu suscripción está activa.');
+  }
+  if (me.billing && me.billing.configured && !me.billing.allowed) { showPaywall(me.billing); return; }
   updateProfileBtn(me.avatar);
   let s = null;
   try { s = await get('/settings'); } catch {}

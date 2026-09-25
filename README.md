@@ -95,6 +95,28 @@ log del servidor** — no le llega el correo a nadie. Para que funcione de verda
 2. Rellena en tu `.env`: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
 3. Reinicia (`docker compose up -d`).
 
+## Activar cobros con Stripe (necesario antes de cobrar por la app)
+
+Sin `STRIPE_SECRET_KEY` y `STRIPE_PRICE_MONTHLY` configurados, la app no exige pago a nadie: es el estado por
+defecto, pensado para que puedas probarla o usarla tú mismo sin más pasos. En cuanto los configuras, cada cuenta
+nueva arranca con **14 días de prueba gratuita** y, al terminar, necesita suscribirse para seguir entrenando (puede
+seguir viendo su cuenta, suscribirse o borrarse, pero no usar el resto de la app). El cobro se hace con Stripe
+Checkout y el Portal de cliente de Stripe — páginas alojadas por Stripe — así que el servidor nunca ve ni toca datos
+de tarjeta.
+
+1. Crea una cuenta en [Stripe](https://dashboard.stripe.com) (puedes probar todo esto en modo test primero).
+2. En **Productos**, crea un producto "TrailCoach" con dos precios recurrentes:
+   - Mensual: 9,99 € / mes
+   - Anual: 99,90 € / año (equivale a 2 meses gratis frente al mensual)
+   Copia el ID de cada precio (`price_...`).
+3. En **Desarrolladores → Webhooks**, añade un endpoint apuntando a `https://tudominio.com/api/stripe/webhook`,
+   escuchando al menos estos eventos: `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`. Copia el "signing secret" (`whsec_...`).
+4. Rellena en tu `.env`: `STRIPE_SECRET_KEY` (clave secreta, `sk_...`), `STRIPE_PRICE_MONTHLY`,
+   `STRIPE_PRICE_YEARLY` y `STRIPE_WEBHOOK_SECRET`.
+5. Reinicia (`docker compose up -d`). Prueba una suscripción de principio a fin con una
+   [tarjeta de test de Stripe](https://docs.stripe.com/testing) antes de pasar a claves reales (`sk_live_...`).
+
 ## Antes de vender esto a otras personas
 
 La app es funcionalmente sólida, pero "funciona bien" y "listo para cobrar por ello" no son lo mismo. Antes de
@@ -108,16 +130,15 @@ lanzarlo como producto de pago, revisa esto:
 - [ ] **Rellena `public/privacy.html` y `public/terms.html`** con tus datos reales (están marcados con
   `[TU NOMBRE/EMAIL]`) y haz que un abogado las revise, sobre todo por tratarse de datos de salud/actividad física
   bajo RGPD si vas a operar en la UE.
-- [ ] **Añade una pasarela de pago** (Stripe, etc.) — de momento no hay cobro integrado.
-- [ ] **Backups automáticos de la base de datos.** Es un único archivo SQLite en un volumen; si el disco falla,
-  se pierde todo. Automatiza una copia periódica (por ejemplo, `sqlite3 .backup` a almacenamiento externo tipo S3/
-  Backblaze).
 - [ ] **Prueba el registro/login/recuperación de contraseña en dispositivos reales** (iOS y Android), no solo en el
   navegador de escritorio.
 
 Ya están cubiertos: cuentas por usuario con contraseña con hash, límite de intentos de login/registro (protección
-básica contra fuerza bruta), recuperación de contraseña (con SMTP configurado) y borrado de cuenta con todos sus
-datos (derecho a la supresión).
+básica contra fuerza bruta), recuperación de contraseña (con SMTP configurado), borrado de cuenta con todos sus
+datos (derecho a la supresión), cobro con Stripe (prueba de 14 días + mensual/anual, ver arriba) y backups: si
+despliegas en Render con disco persistente, ya hace snapshots diarios automáticos con 7 días de retención (panel
+del disco → pestaña "Snapshots"); en otro proveedor, automatiza tú una copia periódica del SQLite (por ejemplo,
+`sqlite3 .backup` a almacenamiento externo tipo S3/Backblaze).
 
 ## Estructura del proyecto
 
@@ -140,6 +161,7 @@ server/
   strava.js     Integración con Strava (por usuario) y sincronización automática en segundo plano
   claude.js     Cliente de la API de Claude para ajustes en lenguaje natural
   mailer.js     Envío de correo (recuperación de contraseña) vía SMTP
+  billing.js    Suscripción con Stripe (Checkout + Portal de cliente + webhook)
 public/       Frontend (PWA en JavaScript puro, sin frameworks)
 ```
 
