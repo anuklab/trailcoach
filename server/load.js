@@ -60,7 +60,9 @@ export function fitnessSeries(userId, from, to, { includePlanned = false } = {})
   return out;
 }
 
+// Misma fórmula y mismos parámetros (includePlanned) que usa el gráfico de Análisis,
+// para que "Forma/Fatiga/Frescura" muestre siempre el mismo número en Hoy y en Análisis.
 export function currentFitness(userId, date) {
-  const s = fitnessSeries(userId, addDays(date, -1), addDays(date, -1));
+  const s = fitnessSeries(userId, date, date, { includePlanned: true });
   return s[s.length - 1] || { ctl: 0, atl: 0, tsb: 0 };
 }

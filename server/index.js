@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, getSettings, setSettings, log, createUser, getUserByEmail, getUserById, verifyPassword } from './db.js';
+import { db, getSettings, setSettings, log, createUser, getUserByEmail, getUserById, verifyPassword, getAvatar, setAvatar } from './db.js';
 import { today, addDays, mondayOf, diffDays } from './util.js';
 import { parseGpx } from './gpx.js';
 import { generatePlan, weeksOverview, estimateRaceHours, racesFor, targetFeasibility } from './planner.js';
@@ -46,7 +46,7 @@ function verifyState(s) {
   return Number.isInteger(uid) ? uid : null;
 }
 
-function publicUser(u) { return { id: u.id, email: u.email, name: u.name || null }; }
+function publicUser(u) { return { id: u.id, email: u.email, name: u.name || null, avatar: u.avatar_data || null }; }
 
 app.post('/api/signup', (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
@@ -224,6 +224,18 @@ app.get('/api/activities', wrap((req, res) => {
 // ---------- Ajustes ----------
 app.get('/api/settings', wrap((req, res) => res.json(getSettings(req.userId))));
 app.put('/api/settings', wrap((req, res) => res.json(setSettings(req.userId, req.body))));
+// Foto de perfil: se sube ya redimensionada/comprimida desde el cliente (data URL), con un
+// límite generoso en el servidor (~800KB en base64) para evitar abusos.
+app.put('/api/avatar', wrap((req, res) => {
+  const data = req.body?.data;
+  if (data != null) {
+    if (typeof data !== 'string' || !data.startsWith('data:image/') || data.length > 800_000) {
+      return res.status(400).json({ error: 'Imagen no válida o demasiado grande' });
+    }
+  }
+  setAvatar(req.userId, data || null);
+  res.json({ avatar: data || null });
+}));
 
 // ---------- Strava ----------
 app.get('/api/strava/status', wrap((req, res) => res.json({ configured: stravaConfigured(), ...stravaStatus(req.userId) })));
@@ -265,7 +277,15 @@ app.get('/api/knowledge', wrap((req, res) => {
 }));
 
 // ---------- Frontend estático ----------
-app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use(express.static(path.join(__dirname, '..', 'public'), {
+  setHeaders: (res, filePath) => {
+    // sw.js y el HTML nunca deben quedarse cacheados por el navegador/red del móvil:
+    // así el service worker se comprueba (y por tanto se actualiza) en cuanto hay conexión.
+    if (filePath.endsWith('sw.js') || filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  },
+}));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
 const PORT = process.env.PORT || 3000;

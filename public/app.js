@@ -986,10 +986,21 @@ async function renderAjustes() {
     <h1>Perfil y ajustes</h1>
     <div class="card">
       <div class="profile-head">
-        <div class="avatar-circle" onclick="toggleTheme()" title="Cambiar tema (día/noche)">${esc(initials)}<span class="avatar-theme-dot">${icon(theme === 'dark' ? 'moon' : 'sun')}</span></div>
+        <div class="avatar-circle" id="avatarCircle" onclick="pickAvatar()" title="Subir foto de perfil"
+          ${me.avatar ? `style="background-image:url('${me.avatar}')"` : ''}>${me.avatar ? '' : esc(initials)}
+          <span class="avatar-edit-dot">${icon('edit')}</span>
+        </div>
+        <input type="file" id="avatarFile" accept="image/*" style="display:none" onchange="onAvatarFile(this)">
         <div style="flex:1"><label>Nombre</label><input id="s-name" value="${esc(s.athlete_name || '')}" placeholder="Tu nombre"></div>
       </div>
-      <p class="small muted" style="margin-top:4px">Toca tu avatar para cambiar entre tema día/noche.</p>
+      <p class="small muted" style="margin-top:4px">Toca tu avatar para subir una foto${me.avatar ? ' · <span style="text-decoration:underline;cursor:pointer" onclick="removeAvatar()">quitar foto</span>' : ''}.</p>
+      <div class="row" style="margin-top:12px;align-items:center">
+        <span class="small muted" style="flex:1">Tema de la app</span>
+        <div class="theme-toggle">
+          <button type="button" class="${theme === 'dark' ? 'active' : ''}" onclick="setTheme('dark')">${icon('moon')} Noche</button>
+          <button type="button" class="${theme === 'light' ? 'active' : ''}" onclick="setTheme('light')">${icon('sun')} Día</button>
+        </div>
+      </div>
     </div>
     <div class="card">
       <h2>Disponibilidad semanal</h2>
@@ -1054,9 +1065,47 @@ function setTheme(t) {
   try { localStorage.setItem('tc_theme', t); } catch {}
   if (currentTab === 'ajustes') renderAjustes();
 }
-function toggleTheme() {
-  const cur = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-  setTheme(cur === 'dark' ? 'light' : 'dark');
+// ---------------- Foto de perfil ----------------
+function pickAvatar() { $('#avatarFile').click(); }
+async function onAvatarFile(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { toast('Elige un archivo de imagen'); return; }
+  try {
+    const dataUrl = await resizeImageFile(file, 300);
+    await put('/avatar', { data: dataUrl });
+    toast('Foto actualizada');
+    renderAjustes();
+  } catch (e) { toast('Error: ' + e.message); }
+}
+async function removeAvatar() {
+  if (!confirm('¿Quitar la foto de perfil?')) return;
+  await put('/avatar', { data: null });
+  renderAjustes();
+}
+// Redimensiona y recorta la imagen a un cuadrado (cover) de `size`x`size` px en JPEG,
+// para que el payload sea pequeño sin depender de librerías externas.
+function resizeImageFile(file, size) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen'));
+    reader.onload = () => {
+      img.onerror = () => reject(new Error('Imagen no válida'));
+      img.onload = () => {
+        const side = Math.min(img.width, img.height);
+        const sx = (img.width - side) / 2, sy = (img.height - side) / 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 // ---------------- Onboarding (tras registrarte: datos + objetivo) ----------------
@@ -1178,7 +1227,33 @@ function enterApp() {
   $('#login').style.display = 'none'; $('#onboarding').style.display = 'none'; $('#app').style.display = 'block';
   loadKnowledge();
   switchTab('hoy');
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  registerSW();
+}
+// Registro del service worker + detección automática de nueva versión: en cuanto hay una
+// versión nueva instalada, le pedimos que tome el control ya y recargamos la página una vez,
+// para que el móvil (donde el usuario casi nunca cierra la pestaña) siempre acabe viendo lo último.
+function registerSW() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    // Si ya hay una versión esperando (instalada mientras la app no estaba abierta), actívala ya.
+    if (reg.waiting) reg.waiting.postMessage('skipWaiting');
+    reg.addEventListener('updatefound', () => {
+      const sw = reg.installing;
+      if (!sw) return;
+      sw.addEventListener('statechange', () => {
+        if (sw.state === 'installed' && navigator.serviceWorker.controller) sw.postMessage('skipWaiting');
+      });
+    });
+    // Comprueba si hay una versión nueva cada vez que la app vuelve a primer plano (útil en móvil,
+    // donde la pestaña queda en background días sin recargarse).
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
 }
 async function boot() {
   if (!Auth.token) { showLogin(); return; }

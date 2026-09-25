@@ -138,6 +138,9 @@ ensureColumn('changelog', 'user_id', 'INTEGER');
 ensureColumn('users', 'strava_last_sync', 'TEXT');
 // legs_heavy pasa de booleano (0/1) a tri-estado (0=ligeras, 1=normales, 2=pesadas); misma columna, sin migración de datos necesaria.
 ensureColumn('checkins', 'wants_session', 'INTEGER'); // el atleta pide entrenar algo en un día marcado como descanso
+// Foto de perfil: se guarda aparte de `settings` (que se lee/fusiona en casi cada petición)
+// para no cargar una imagen en cada llamada que solo necesita los ajustes normales.
+ensureColumn('users', 'avatar_data', 'TEXT');
 
 // Los índices por user_id se crean aquí, después de las migraciones, para garantizar
 // que la columna ya existe (en una base de datos previa a multiusuario, no existía
@@ -209,6 +212,14 @@ export function setSettings(userId, patch) {
   const merged = { ...getSettings(userId), ...patch };
   db.prepare('UPDATE users SET settings = ? WHERE id = ?').run(JSON.stringify(merged), userId);
   return merged;
+}
+
+// ---------- Foto de perfil ----------
+export function getAvatar(userId) {
+  return db.prepare('SELECT avatar_data FROM users WHERE id = ?').get(userId)?.avatar_data || null;
+}
+export function setAvatar(userId, dataUrl) {
+  db.prepare('UPDATE users SET avatar_data = ? WHERE id = ?').run(dataUrl || null, userId);
 }
 
 export function getKV(key, fallback = null) {

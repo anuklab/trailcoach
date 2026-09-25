@@ -57,16 +57,17 @@ label { display: block; font-size: .82rem; color: var(--muted); margin: .6em 0 .
 /* Perfil: avatar + toggle de tema */
 .profile-head { display: flex; align-items: center; gap: 14px; }
 .avatar-circle {
-  position: relative; flex: 0 0 auto; width: 56px; height: 56px; border-radius: 50%;
+  position: relative; flex: 0 0 auto; width: 64px; height: 64px; border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0e1512;
-  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.15rem;
+  background-size: cover; background-position: center;
+  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.25rem;
   cursor: pointer; user-select: none;
 }
-.avatar-theme-dot {
-  position: absolute; bottom: -3px; right: -3px; width: 22px; height: 22px; border-radius: 50%;
-  background: var(--panel); border: 2px solid var(--bg); display: flex; align-items: center; justify-content: center;
+.avatar-edit-dot {
+  position: absolute; bottom: -3px; right: -3px; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--panel); display: flex; align-items: center; justify-content: center;
 }
-.avatar-theme-dot svg { width: 12px; height: 12px; color: var(--text); }
+.avatar-edit-dot svg { width: 13px; height: 13px; color: #0e1512; }
 
 /* Disponibilidad semanal: grid visual en vez de lista apilada */
 .avail-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0 14px; }

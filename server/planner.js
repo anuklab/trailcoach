@@ -240,10 +240,14 @@ function buildWeek(w) {
     base: ['vert'], 'construcción': ['vert', 'intervals'], 'específico': ['vert', 'tempo'],
     'asimilación': ['tempo'], afinado: ['vert'],
   }[phase] || [];
+  // Las sesiones de desnivel alternan semana a semana entre foco en subida (técnica de power
+  // hiking) y foco en bajada (técnica de frenada/apoyo) — un ultra exige ambas por separado.
+  const vertVariant = (Math.floor(diffDays('2020-01-06', ws) / 7) % 2 === 0) ? 'subida' : 'bajada';
   quality.forEach((i, k) => {
     const t = qTypes[k] || 'tempo';
     const d = Math.min(avail[i], phase === 'específico' ? 90 : phase === 'construcción' ? 75 : 60);
-    plan[i] = mk(i, t, d, { key: true, zone: t === 'intervals' ? 'Z4-Z5' : t === 'vert' ? 'Z3-Z4' : 'Z3' });
+    plan[i] = mk(i, t, d, { key: true, zone: t === 'intervals' ? 'Z4-Z5' : t === 'vert' ? 'Z3-Z4' : 'Z3',
+      ...(t === 'vert' ? { variant: vertVariant } : {}) });
     remaining -= d;
   });
 
