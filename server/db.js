@@ -120,20 +120,6 @@ CREATE TABLE IF NOT EXISTS nutrition_logs (
   notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-
--- Material: zapatillas, bastones, mochila… con kilometraje acumulado para saber cuándo tocaría cambiarlo.
-CREATE TABLE IF NOT EXISTS gear (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  type TEXT DEFAULT 'zapatillas',   -- zapatillas, bastones, mochila, otro
-  km_limit REAL DEFAULT 700,        -- km recomendados antes de cambiarlo
-  km_start REAL DEFAULT 0,          -- km que ya tenía al darlo de alta (si no es nuevo)
-  km_accrued REAL DEFAULT 0,        -- km sumados automáticamente desde Strava + ajustes manuales
-  active INTEGER DEFAULT 1,         -- en uso actualmente (solo unas zapatillas "activas" a la vez)
-  retired INTEGER DEFAULT 0,        -- retirado/jubilado
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
 `);
 
 // Migraciones ligeras: añade columnas nuevas si la base de datos ya existía sin ellas
@@ -167,7 +153,6 @@ CREATE INDEX IF NOT EXISTS idx_sess_user_date ON sessions(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_checkins_user_date ON checkins(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_changelog_user ON changelog(user_id);
 CREATE INDEX IF NOT EXISTS idx_nutri_user_date ON nutrition_logs(user_id, date);
-CREATE INDEX IF NOT EXISTS idx_gear_user ON gear(user_id);
 `);
 
 // ---------- Autenticación ----------

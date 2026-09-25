@@ -1,10 +1,15 @@
-// Generador del plan de entrenamiento periodizado para ultra trail.
+// Generador del plan de entrenamiento periodizado para ultra trail. El reparto semanal (qué
+// días, cuánto volumen, cuánta intensidad) lo decide esta pieza; QUÉ metodología aplica cada
+// semana (fase, polarizado/piramidal, énfasis de bajada, back-to-back...) lo decide methodology.js
+// — así el algoritmo combina varias metodologías reales en vez de forzar una sola.
 import { db, getSettings, tx, log } from './db.js';
 import { sessionLoad } from './load.js';
 import { addDays, diffDays, mondayOf, weekday, today, clamp, round5, toDate } from './util.js';
 import { describe } from './workouts.js';
+import { phaseForWeek, selectMethodology } from './methodology.js';
 
 const RUN_TYPES = `('Run','TrailRun','Hike','Walk','VirtualRun')`;
+const LOADING_PHASES = ['base', 'build', 'specific', 'peak'];
 
 // ---------- Estimaciones a partir del historial ----------
 
@@ -58,12 +63,12 @@ function recentBaseline(userId, from) {
       FROM sessions WHERE user_id = ? AND week_start >= ? AND week_start < ? AND type != 'rest' GROUP BY week_start ORDER BY week_start`).all(userId, w3, mondayOf(from));
   let buildMin = null, loadStreak = 0;
   if (weeks.length) {
-    const loading = weeks.filter(w => ['base', 'construcción', 'específico'].includes(w.phase));
+    const loading = weeks.filter(w => LOADING_PHASES.includes(w.phase));
     const plannedAll = weeks.reduce((s, w) => s + w.planned, 0);
     const actualAll = db.prepare(`SELECT SUM(moving_time_s)/60.0 m FROM activities WHERE user_id = ? AND date >= ? AND date < ?`).get(userId, w3, mondayOf(from))?.m || 0;
     const compliance = plannedAll ? clamp(actualAll / plannedAll, 0.75, 1.05) : 1;
     if (loading.length) buildMin = Math.max(...loading.map(w => w.planned)) * compliance;
-    for (let i = weeks.length - 1; i >= 0 && ['base', 'construcción', 'específico'].includes(weeks[i].phase); i--) loadStreak++;
+    for (let i = weeks.length - 1; i >= 0 && LOADING_PHASES.includes(weeks[i].phase); i--) loadStreak++;
   }
   return {
     // Suelo algo más alto que antes: con una base demasiado baja, la semana 1 queda tan corta
@@ -78,30 +83,6 @@ function recentBaseline(userId, from) {
 
 function racesForUser(userId) {
   return db.prepare('SELECT * FROM races WHERE user_id = ? ORDER BY date').all(userId).map(r => ({ ...r, est_h: estimateRaceHours(userId, r) }));
-}
-
-function phaseForWeek(ws, races) {
-  const we = addDays(ws, 6);
-  const main = races.filter(r => r.priority !== 'C');
-  const inWeek = main.find(r => r.date >= ws && r.date <= we);
-  if (inWeek) return { phase: 'carrera', race: inWeek };
-  // recuperación tras carrera A/B
-  const prev = main.filter(r => r.date < ws).pop();
-  if (prev) {
-    const weeksAfter = Math.ceil(diffDays(mondayOf(prev.date), ws) / 7);
-    const big = (prev.distance_km || 0) + (prev.dplus_m || 0) / 100 > 120;
-    if (weeksAfter === 1) return { phase: 'recuperación', race: prev, factor: prev.priority === 'A' || big ? 0.35 : 0.55 };
-    if (weeksAfter === 2 && big) return { phase: 'recuperación', race: prev, factor: 0.65 };
-  }
-  const next = main.find(r => r.date > we);
-  if (!next) return { phase: 'transición', race: null, factor: 0.5 };
-  const N = Math.round(diffDays(ws, mondayOf(next.date)) / 7);
-  if (next.priority === 'A' && N === 1) return { phase: 'afinado', race: next, factor: 0.6 };
-  if (next.priority === 'A' && N === 2) return { phase: 'afinado', race: next, factor: 0.8 };
-  if (next.priority === 'B' && N === 1) return { phase: 'afinado', race: next, factor: 0.8 };
-  if (N <= 8) return { phase: 'específico', race: next, N };
-  if (N <= 16) return { phase: 'construcción', race: next, N };
-  return { phase: 'base', race: next, N };
 }
 
 // ---------- Generación ----------
@@ -128,41 +109,45 @@ export function generatePlan(userId, { from = null, reason = 'Plan generado' } =
   const out = [];
   for (let ws = mondayOf(start); ws <= end; ws = addDays(ws, 7)) {
     const ph = phaseForWeek(ws, races);
+    const methodology = selectMethodology(userId, ws, ph);
     const race = ph.race;
     const peakMin = race ? Math.min(capMin, clamp((race.est_h || 20) * 0.4 + 6, 8, 18) * 60) : capMin * 0.7;
     const dens = race?.dplus_m && race.est_h ? race.dplus_m / race.est_h : 200; // m/h de carrera
     const peakLong = race ? Math.min(st.availability[st.long_day] || 240, clamp((race.est_h || 10) * 0.2 * 60, 120, 390)) : 180;
 
-    let weekMin, phase = ph.phase, densF = 0.6;
-    if (['base', 'construcción', 'específico'].includes(phase)) {
+    let weekMin, phase = ph.phase, densF = 0.6, deload = false;
+    if (LOADING_PHASES.includes(phase)) {
       streak++;
-      if (streak % 4 === 0) { phase = 'asimilación'; weekMin = buildMin * 0.7; }
+      if (streak % 4 === 0) { deload = true; weekMin = buildMin * 0.7; }
       else {
         buildMin = Math.min(peakMin, buildMin * 1.1 + 15);
         weekMin = buildMin;
         longMin = Math.min(peakLong, longMin + (phase === 'base' ? 15 : 25));
       }
-      densF = { base: 0.55, 'construcción': 0.85, 'específico': 1.1, 'asimilación': 0.7 }[phase];
+      densF = { base: 0.55, build: 0.85, specific: 1.05, peak: 1.15 }[phase] * (deload ? 0.75 : 1);
     } else {
       streak = 0;
-      if (phase === 'carrera') weekMin = buildMin * 0.35;
+      if (phase === 'race') weekMin = buildMin * 0.35;
       else weekMin = buildMin * (ph.factor ?? 0.6);
-      if (phase === 'recuperación') { longMin = Math.max(90, longMin * 0.8); densF = 0.4; }
-      if (phase === 'afinado') densF = 0.8;
+      if (phase === 'recovery') { longMin = Math.max(90, longMin * 0.8); densF = 0.4; }
+      if (phase === 'taper') densF = 0.8;
     }
+    // Adaptación continua: si llega muy cargado (Frescura muy negativa de verdad, no solo por el
+    // bloque), recortamos la semana aunque tocase subir — un entrenador de carne y hueso haría lo mismo.
+    if (methodology.overloaded) { weekMin *= 0.85; densF *= 0.8; }
     weekMin = Math.min(weekMin, capMin);
 
     const week = {
-      ws, phase, race, weekMin, dplus: Math.round(weekMin / 60 * dens * densF),
-      longMin: phase === 'afinado' ? Math.min(longMin, 60 + (ph.factor || 0.6) * 150)
-        : phase === 'asimilación' ? longMin * 0.75 : phase === 'recuperación' ? Math.min(longMin, 90) : longMin,
+      ws, phase, race, weekMin, deload, methodology, dplus: Math.round(weekMin / 60 * dens * densF),
+      longMin: phase === 'taper' ? Math.min(longMin, 60 + (ph.factor || 0.6) * 150)
+        : deload ? longMin * 0.75 : phase === 'recovery' ? Math.min(longMin, 90) : longMin,
       st, races, dens,
     };
     for (const s of buildWeek(week)) {
       if (s.date < start || keepDates.has(s.date)) continue;
       out.push(s);
     }
-    if (phase === 'recuperación' || phase === 'carrera') buildMin = Math.max(buildMin * 0.92, 180);
+    if (phase === 'recovery' || phase === 'race') buildMin = Math.max(buildMin * 0.92, 180);
   }
 
   tx(() => {
@@ -177,7 +162,7 @@ export function generatePlan(userId, { from = null, reason = 'Plan generado' } =
 }
 
 function buildWeek(w) {
-  const { ws, phase, race, st } = w;
+  const { ws, phase, race, st, methodology, deload } = w;
   const avail = st.availability.slice();
   const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(ws, i));
   const sessions = [];
@@ -189,7 +174,7 @@ function buildWeek(w) {
 
   // --- Semana de carrera ---
   const raceHere = w.races.filter(r => r.date >= ws && r.date <= days[6]);
-  if (phase === 'carrera') {
+  if (phase === 'race') {
     const r = w.race; const ri = weekday(r.date);
     for (let i = 0; i < 7; i++) {
       if (i === ri) sessions.push(mk(i, 'race', (r.est_h || 10) * 60, { dplus_m: r.dplus_m || 0, distance_km: r.distance_km, key: true, zone: 'Z2-Z3' }));
@@ -205,12 +190,16 @@ function buildWeek(w) {
   // --- Semana normal ---
   let L = st.long_day, B = st.b2b_day;
   if (!avail[L]) L = avail.indexOf(Math.max(...avail));
-  const useB2B = ['específico', 'construcción'].includes(phase) && B !== L && avail[B] >= 60;
+  // Back-to-back long runs: se priorizan en específico/peak (máxima especificidad de fatiga
+  // acumulada), pero también se usan en construcción si hay disponibilidad, igual que antes.
+  const useB2B = ['build', 'specific', 'peak'].includes(phase) && B !== L && avail[B] >= 60 && !methodology.overloaded;
   const restDays = new Set([0, 1, 2, 3, 4, 5, 6].filter(i => !avail[i]));
   if (!restDays.size) restDays.add((L + (useB2B ? 2 : 1)) % 7);
 
-  const nQuality = { base: 1, 'construcción': 2, 'específico': 2, 'asimilación': 1, afinado: 1, 'recuperación': 0, 'transición': 0 }[phase] ?? 1;
-  const nStrength = !st.strength ? 0 : { base: 2, 'construcción': 2, 'específico': 1, 'asimilación': 1, afinado: phase === 'afinado' && w.weekMin < 0.7 * 600 ? 0 : 1, 'recuperación': 1, 'transición': 2 }[phase] ?? 1;
+  const baseNQuality = { base: 1, build: 2, specific: 2, peak: 2, taper: 1, recovery: 0 }[phase] ?? 1;
+  const nQuality = methodology.overloaded ? Math.max(0, baseNQuality - 1) : (deload ? Math.max(0, baseNQuality - 1) : baseNQuality);
+  const baseNStrength = !st.strength ? 0 : { base: 2, build: 2, specific: 1, peak: 1, taper: phase === 'taper' && w.weekMin < 0.7 * 600 ? 0 : 1, recovery: 1 }[phase] ?? 1;
+  const nStrength = deload ? Math.max(st.strength ? 1 : 0, baseNStrength - 1) : baseNStrength;
 
   // Elegir días de calidad: lejos de la tirada larga y separados entre sí
   const quality = [];
@@ -233,19 +222,26 @@ function buildWeek(w) {
   const longDur = Math.min(w.longMin, avail[L]);
   plan[L] = mk(L, 'long', longDur, { key: true, zone: 'Z1-Z2' }); remaining -= longDur;
   if (useB2B) {
-    const d = Math.min(avail[B], phase === 'específico' ? longDur * 0.6 : Math.min(90, longDur * 0.5));
-    plan[B] = mk(B, 'b2b', d, { key: phase === 'específico', zone: 'Z1-Z2' }); remaining -= d;
+    const d = Math.min(avail[B], ['specific', 'peak'].includes(phase) ? longDur * 0.6 : Math.min(90, longDur * 0.5));
+    plan[B] = mk(B, 'b2b', d, { key: ['specific', 'peak'].includes(phase), zone: 'Z1-Z2' }); remaining -= d;
   }
+  // Qué tipo de sesión de calidad toca según fase: base introduce desnivel suave; construcción
+  // combina desnivel + series (pieza polarizada); específico y peak combinan desnivel + tempo
+  // (pieza piramidal, ya en terreno de carrera); afinado solo mantiene un recuerdo de desnivel.
   const qTypes = {
-    base: ['vert'], 'construcción': ['vert', 'intervals'], 'específico': ['vert', 'tempo'],
-    'asimilación': ['tempo'], afinado: ['vert'],
+    base: ['vert'], build: ['vert', 'intervals'], specific: ['vert', 'tempo'],
+    peak: ['vert', 'tempo'], taper: ['vert'],
   }[phase] || [];
-  // Las sesiones de desnivel alternan semana a semana entre foco en subida (técnica de power
-  // hiking) y foco en bajada (técnica de frenada/apoyo) — un ultra exige ambas por separado.
-  const vertVariant = (Math.floor(diffDays('2020-01-06', ws) / 7) % 2 === 0) ? 'subida' : 'bajada';
+  // Las sesiones de desnivel alternan subida/bajada. Cuando la carrera objetivo es muy técnica de
+  // bajada (o estamos ya en específico/peak, priorizando especificidad de montaña) sesgamos hacia
+  // más sesiones de bajada/excéntrico, que es lo que más protege la rodilla en carrera.
+  const weekIdx = Math.floor(diffDays('2020-01-06', ws) / 7);
+  const vertVariant = methodology.downhillEmphasis
+    ? (weekIdx % 3 === 0 ? 'subida' : 'bajada')
+    : (weekIdx % 2 === 0 ? 'subida' : 'bajada');
   quality.forEach((i, k) => {
     const t = qTypes[k] || 'tempo';
-    const d = Math.min(avail[i], phase === 'específico' ? 90 : phase === 'construcción' ? 75 : 60);
+    const d = Math.min(avail[i], ['specific', 'peak'].includes(phase) ? 90 : phase === 'build' ? 75 : 60);
     plan[i] = mk(i, t, d, { key: true, zone: t === 'intervals' ? 'Z4-Z5' : t === 'vert' ? 'Z3-Z4' : 'Z3',
       ...(t === 'vert' ? { variant: vertVariant } : {}) });
     remaining -= d;
@@ -260,7 +256,7 @@ function buildWeek(w) {
     const used = plan[i]?.duration_min || 0;
     if (avail[i] - used >= 30 || (!plan[i] && avail[i] >= 30)) strengthDays.push(i);
   }
-  const strengthMin = phase === 'recuperación' ? 30 : 40;
+  const strengthMin = phase === 'recovery' ? 30 : 40;
   remaining -= strengthDays.length * strengthMin;
 
   // Rodajes suaves con el tiempo restante. Cualquier día con disponibilidad real (no marcado
@@ -271,14 +267,14 @@ function buildWeek(w) {
   const MIN_EASY = 20;
   const easyDays = [0, 1, 2, 3, 4, 5, 6].filter(i => !plan[i] && !restDays.has(i) && avail[i] >= MIN_EASY);
   const cap = i => avail[i] - (strengthDays.includes(i) ? strengthMin : 0);
-  const maxDur = phase === 'recuperación' ? 50 : 90;
+  const maxDur = phase === 'recovery' ? 50 : 90;
   const totalFloor = easyDays.reduce((s, i) => s + Math.min(MIN_EASY, cap(i)), 0);
   const extra = Math.max(0, remaining - totalFloor);
   const totalBonusCap = easyDays.reduce((s, i) => s + Math.max(0, cap(i) - MIN_EASY), 0) || 1;
   for (const i of easyDays) {
     const bonus = extra * Math.max(0, cap(i) - MIN_EASY) / totalBonusCap;
     const d = clamp(MIN_EASY + bonus, Math.min(MIN_EASY, cap(i)), Math.min(cap(i), maxDur));
-    plan[i] = mk(i, phase === 'recuperación' ? 'recovery' : 'easy', d, { zone: phase === 'recuperación' ? 'Z1' : 'Z1-Z2' });
+    plan[i] = mk(i, phase === 'recovery' ? 'recovery' : 'easy', d, { zone: phase === 'recovery' ? 'Z1' : 'Z1-Z2' });
   }
 
   for (let i = 0; i < 7; i++) {
@@ -306,7 +302,7 @@ function finalize(sessions, w) {
       const maxRate = s.type === 'vert' ? 700 : s.type === 'long' || s.type === 'b2b' ? 450 : 300;
       s.dplus_m = Math.round(Math.min(w.dplus * share[s.type] * s.duration_min / tot, s.duration_min / 60 * maxRate) / 10) * 10;
     }
-    Object.assign(s, describe(s, { race: w.race, phase: w.phase, settings: w.st }));
+    Object.assign(s, describe(s, { race: w.race, phase: w.phase, settings: w.st, methodology: w.methodology }));
     s.load = sessionLoad(s);
   }
   return sessions.sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'strength') - (b.type === 'strength'));

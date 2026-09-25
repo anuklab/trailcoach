@@ -25,6 +25,57 @@ function fuelNote(durationMin, weightKg) {
   return ` Practica tomar ${t.carbs_g_per_h} g de carbohidrato/hora y ${t.sodium_mg_per_h} mg de sodio/hora, igual que en carrera — no esperes a tener hambre o sed.`;
 }
 
+// Explica al atleta, sesión a sesión, QUÉ adaptación busca ese entreno concreto en la fase en la
+// que está — no solo "qué toca hacer" sino "para qué sirve". Es lo que convierte el plan en algo
+// que se entiende, en vez de un calendario de casillas a rellenar.
+const WHY = {
+  long: {
+    base: 'construye la base aeróbica y la resistencia a la fatiga — la adaptación que más pesa en un ultra, y la que más tarda en construirse.',
+    build: 'sigue subiendo el volumen que tus piernas y tu sistema aeróbico pueden absorber, antes de meter más intensidad encima.',
+    specific: 'acostumbra al cuerpo al terreno y desnivel reales de tu carrera, no solo a acumular kilómetros.',
+    peak: 'es el ensayo general: terreno, material y alimentación lo más parecido posible al día de carrera.',
+    taper: 'mantiene el estímulo de piernas sin acumular fatiga nueva de cara a la carrera.',
+    recovery: 'reactiva el cuerpo con carga baja después del esfuerzo de la carrera.',
+  },
+  b2b: {
+    build: 'empieza a enseñar al cuerpo a moverse bien con las piernas ya cargadas, sin depender de una única tirada gigante.',
+    specific: 'es la adaptación más específica de ultra que existe: correr fatigado, justo lo que te pedirá la segunda mitad de carrera.',
+    peak: 'simula el desgaste acumulado de un día muy largo repartido en dos jornadas, con menos riesgo que una tirada única enorme.',
+  },
+  vert: {
+    base: 'introduce la técnica de subida y bajada de montaña sin buscar todavía mucha intensidad.',
+    build: 'sube la fuerza-resistencia de piernas para el desnivel real de tu carrera.',
+    specific: 'especificidad de montaña: el power hiking en subida y el frenado en bajada son un gesto distinto a correr llano, y hay que entrenarlo aparte.',
+    peak: 'últimos toques de especificidad de montaña antes de bajar la carga para la carrera.',
+    taper: 'mantiene la técnica de montaña activa sin generar fatiga nueva.',
+  },
+  tempo: {
+    build: 'sube el ritmo que puedes sostener "cómodamente duro" durante muchas horas — el trabajo de umbral que más marca el resultado en un ultra.',
+    specific: 'aplica ese umbral ya entrenado directamente al esfuerzo de carrera.',
+    peak: 'mantiene el umbral sin sumar volumen extra, priorizando la recuperación para el simulacro largo de esta fase.',
+    taper: 'un toque corto de intensidad para no perder la chispa de piernas, sin generar fatiga.',
+  },
+  intervals: {
+    build: 'sube el techo aeróbico (VO2max) para que el ritmo de carrera te cueste menos esfuerzo relativo.',
+  },
+  strength: {
+    base: 'construye fuerza general y equilibrio antes de que llegue el volumen fuerte de correr.',
+    build: 'mantiene la fuerza mientras sube el volumen de carrera.',
+    specific: 'refuerza el control excéntrico (frenado en bajada) justo cuando más desnivel técnico mete el plan.',
+    peak: 'mantenimiento mínimo, para no restar recuperación a los simulacros largos de esta fase.',
+    taper: 'activación ligera, sin generar fatiga muscular de cara a la carrera.',
+    recovery: 'recupera y corrige asimetrías después del esfuerzo de la carrera.',
+  },
+  easy: {
+    base: 'suma volumen aeróbico de baja fatiga — el pilar del entrenamiento polarizado en esta fase.',
+    build: 'rellena volumen fácil entre los días de calidad, para que la carga total suba sin añadir más fatiga de la necesaria.',
+  },
+};
+function whyFor(type, phase) {
+  const w = WHY[type]?.[phase];
+  return w ? ` 🎯 Por qué recibes esta sesión: ${w}` : '';
+}
+
 export function describe(s, ctx = {}) {
   const race = ctx.race, poles = ctx.settings?.poles, weight = ctx.settings?.weight_kg;
   // ¿Esta carrera probablemente se corre de noche/con luz artificial? (ultras largos, >14h estimadas)
@@ -91,5 +142,6 @@ export function describe(s, ctx = {}) {
       break;
     default: desc = hm(s.duration_min);
   }
+  if (!['rest', 'race'].includes(s.type)) desc += whyFor(s.type, ctx.phase);
   return { title, description: desc };
 }

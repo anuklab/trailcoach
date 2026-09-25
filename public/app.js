@@ -1074,12 +1074,6 @@ async function renderAjustes() {
     </div>
     <button class="primary" style="width:100%" onclick="saveSettings()">Guardar ajustes</button>
     <div class="card" style="margin-top:20px">
-      <h2>Material</h2>
-      <p class="muted small">Lleva la cuenta del kilometraje de tus zapatillas y bastones — avisa cuando toque cambiarlos. El kilometraje de las zapatillas activas se suma solo al sincronizar Strava.</p>
-      <div id="gearList"><div class="list-empty">Cargando…</div></div>
-      <button style="width:100%;margin-top:8px" onclick="gearModal()">Añadir material</button>
-    </div>
-    <div class="card" style="margin-top:20px">
       <h2>Cuenta</h2>
       <p class="small muted">Conectado como <strong>${esc(me.email)}</strong></p>
       <button class="danger" style="width:100%;margin-top:6px" onclick="logout()">Cerrar sesión</button>
@@ -1089,67 +1083,7 @@ async function renderAjustes() {
   $$('#s-strengthmode .chip').forEach(c => c.addEventListener('click', () => {
     $$('#s-strengthmode .chip').forEach(x => x.classList.remove('selected')); c.classList.add('selected');
   }));
-  loadGearInline();
 }
-
-// ---------------- Material (zapatillas, bastones…) ----------------
-const GEAR_TYPE_LABEL = { zapatillas: 'Zapatillas', bastones: 'Bastones', mochila: 'Mochila', otro: 'Otro' };
-async function loadGearInline() {
-  const el = $('#gearList');
-  let items;
-  try { items = await get('/gear'); } catch { el.innerHTML = ''; return; }
-  gearCache = items;
-  const active = items.filter(g => !g.retired);
-  const retired = items.filter(g => g.retired);
-  el.innerHTML = active.length ? active.map(gearRow).join('') : '<p class="list-empty">Sin material registrado todavía.</p>';
-  if (retired.length) el.innerHTML += `<p class="small muted" style="margin-top:10px">Retirado: ${retired.map(g => esc(g.name)).join(', ')}</p>`;
-}
-function gearRow(g) {
-  const km = g.km_start + g.km_accrued;
-  const pct = Math.min(100, Math.round(km / (g.km_limit || 700) * 100));
-  const color = pct >= 100 ? 'var(--danger)' : pct >= 85 ? 'var(--warn)' : 'var(--accent)';
-  return `<div class="card tight" style="margin-top:8px">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div><strong>${esc(g.name)}</strong> <span class="small muted">· ${GEAR_TYPE_LABEL[g.type] || g.type}${g.type === 'zapatillas' && g.active ? ' · en uso' : ''}</span></div>
-      <button class="ghost" onclick="gearModal(${g.id})">${icon('edit')}</button>
-    </div>
-    <div class="progressbar" style="margin-top:8px"><div style="width:${pct}%;background:${color}"></div></div>
-    <p class="small muted" style="margin-top:4px">${Math.round(km)} / ${Math.round(g.km_limit)} km${pct >= 100 ? ' — toca cambiarlo' : pct >= 85 ? ' — se acerca el cambio' : ''}</p>
-  </div>`;
-}
-function gearModal(id) {
-  const editing = !!id;
-  const g = editing ? gearCache.find(x => x.id === id) : null;
-  openModal(`
-    <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
-    <h2>${editing ? 'Editar material' : 'Añadir material'}</h2>
-    <label>Nombre</label><input id="g-name" value="${esc(g?.name || '')}" placeholder="ej: Speedgoat 6">
-    <label>Tipo</label>
-    <select id="g-type">${Object.entries(GEAR_TYPE_LABEL).map(([k, v]) => `<option value="${k}" ${g?.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
-    <div class="row">
-      <div><label>Km ya recorridos (opcional)</label><input id="g-start" type="number" value="${g?.km_start ?? 0}"></div>
-      <div><label>Cambiar a los (km)</label><input id="g-limit" type="number" value="${g?.km_limit ?? 700}"></div>
-    </div>
-    ${(g?.type || 'zapatillas') === 'zapatillas' ? `<label><input type="checkbox" id="g-active" ${g?.active || !editing ? 'checked' : ''} style="width:auto"> En uso (suma km automáticamente al sincronizar Strava)</label>` : ''}
-    <div class="row" style="margin-top:12px">
-      ${editing ? `<button class="danger" onclick="deleteGearConfirm(${id})">Eliminar</button>` : '<div></div>'}
-      ${editing && !g.retired ? `<button onclick="retireGear(${id})">Retirar</button>` : ''}
-      <button class="primary" onclick="saveGear(${id || 'null'})">Guardar</button>
-    </div>
-  `, { center: true });
-}
-let gearCache = [];
-async function saveGear(id) {
-  const body = {
-    name: $('#g-name').value.trim() || 'Material', type: $('#g-type').value,
-    km_start: +$('#g-start').value || 0, km_limit: +$('#g-limit').value || 700,
-    active: $('#g-active') ? $('#g-active').checked : false,
-  };
-  if (id) await put(`/gear/${id}`, body); else await post('/gear', body);
-  closeModals(); toast('Material guardado'); loadGearInline();
-}
-async function retireGear(id) { await put(`/gear/${id}`, { retired: true, active: false }); closeModals(); toast('Material retirado'); loadGearInline(); }
-async function deleteGearConfirm(id) { if (!confirm('¿Eliminar este material?')) return; await del(`/gear/${id}`); closeModals(); toast('Eliminado'); loadGearInline(); }
 async function saveSettings() {
   const availability = $$('.avail').map(i => +i.value || 0);
   const modeChip = $('#s-strengthmode .chip.selected');

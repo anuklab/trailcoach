@@ -94,17 +94,37 @@ export function strengthDescription(mode, minutes) {
 
 // ---------- Metodología: en qué se basa el plan ----------
 export const METHOD_GUIDE = {
-  overview: 'TrailCoach combina tres piezas: un modelo de carga de entrenamiento (para saber cuánto llevas acumulado y cuánto puedes asumir), una periodización clásica por fases (para que esa carga suba en el momento adecuado) y una estimación de ritmo de carrera basada en tu propio historial.',
+  overview: 'TrailCoach no sigue una única metodología: combina varias piezas reales del entrenamiento de resistencia y ultra trail, y decide cada semana qué mezcla aplica según tu carrera objetivo, tu nivel, tu disponibilidad y tu fatiga real — no un calendario fijo de 12-16 semanas.',
   items: [
     {
       title: 'Carga: modelo TRIMP / Banister (Forma, Fatiga, Frescura)',
-      text: 'Cada sesión genera una "carga" (TRIMP) a partir de su duración e intensidad (frecuencia cardiaca real si tienes Strava conectado, o una estimación por tipo de sesión si no). A partir de esa carga se calculan tres números: Forma (CTL) es la media de carga de los últimos 42 días — tu nivel de fondo. Fatiga (ATL) es la media de los últimos 7 días — lo reciente. Frescura (TSB) es Forma − Fatiga: positivo significa que estás fresco, muy negativo indica riesgo de sobrecarga. Es el mismo modelo que usan TrainingPeaks o el "Fitness & Freshness" de Strava.',
+      text: 'Cada sesión genera una "carga" (TRIMP) a partir de su duración e intensidad (frecuencia cardiaca real si tienes Strava conectado, o una estimación por tipo de sesión si no). A partir de esa carga se calculan tres números: Forma (CTL) es la media de carga de los últimos 42 días — tu nivel de fondo. Fatiga (ATL) es la media de los últimos 7 días — lo reciente. Frescura (TSB) es Forma − Fatiga: positivo significa que estás fresco, muy negativo indica riesgo de sobrecarga. Es el mismo modelo que usan TrainingPeaks o el "Fitness & Freshness" de Strava. Si llegas a una semana con la Frescura muy negativa de verdad, el plan la recorta aunque tocase subir carga — así el sistema reacciona a tus datos reales, no solo a la casilla del calendario.',
       source: 'Banister et al. — Modeling elite athletic performance (modelo TRIMP/impulso-respuesta)',
     },
     {
-      title: 'Periodización por fases',
-      text: 'El plan avanza por fases: base (construir fondo aeróbico), construcción y específico (sube el volumen y aparece el desnivel/intensidad propios de tu carrera), afinado (bajada de carga antes de la carrera para llegar fresco) y recuperación (después de la carrera). Cada 4 semanas de carga se intercala una semana de asimilación con menos volumen, para consolidar sin acumular fatiga sin control.',
-      source: 'Periodización clásica de resistencia (Matveyev / práctica habitual en ultra trail)',
+      title: 'Periodización por bloques: BASE → BUILD → SPECIFIC → PEAK → TAPER → RACE → RECOVERY',
+      text: 'La temporada se divide sola en fases según cuánto falta para tu carrera: Base (fondo aeróbico general), Construcción/Build (sube el volumen y aparece desnivel e intensidad), Específico (terreno y esfuerzo ya parecidos a tu carrera), Máxima especificidad/Peak (últimas semanas de carga: simulacros y especificidad de montaña por encima de más volumen), Afinado/Taper (baja la carga para llegar fresco), Carrera/Race y Recuperación/Recovery. Cada 4 semanas de carga se intercala una semana de descarga con menos volumen, para consolidar sin acumular fatiga sin control.',
+      source: 'Periodización por bloques (Issurin) y práctica habitual en ultra trail',
+    },
+    {
+      title: 'Distribución de intensidad: polarizado y piramidal, no uno solo',
+      text: 'El plan cambia de modelo según la fase. Polarizado (mucho volumen muy suave + poco pero muy fuerte, casi nada de umbral) domina en Base — construir fondo sin fatiga innecesaria — y otra vez en Peak/Afinado, priorizando simulacros suaves o recortando carga. Piramidal (el volumen baja según sube la intensidad, con bastante trabajo de umbral) domina en Construcción y Específico, para subir el ritmo que aguantas "cómodamente duro" muchas horas — lo que más decide un ultra.',
+      source: 'Seiler — What is best practice for training intensity distribution in endurance athletes?',
+    },
+    {
+      title: 'Back-to-back long runs y especificidad de fatiga',
+      text: 'En las fases Específico y Peak aparecen tiradas largas en días consecutivos (viernes-sábado o sábado-domingo), a propósito con las piernas ya cargadas: es la forma más eficaz de entrenar el cuerpo a seguir moviéndose bien fatigado sin necesitar una única tirada gigante que sería muy difícil de recuperar.',
+      source: 'Práctica habitual de entrenadores de ultra distancia (block loading of long runs)',
+    },
+    {
+      title: 'Especificidad de montaña',
+      text: 'El plan distingue explícitamente subida corriendo/power hiking, bajada técnica y trabajo excéntrico, y da más peso a la bajada cuanto más técnica de descenso tenga tu carrera objetivo o más cerca esté (fases Específico y Peak) — porque el gesto de subir y el de bajar en montaña son técnicas distintas a correr en llano.',
+      source: 'Especificidad del entrenamiento aplicada a ultra trail',
+    },
+    {
+      title: 'Nivel del atleta',
+      text: 'Tu nivel (principiante, intermedio, avanzado) se infiere de tu historial real: volumen del último año, la ultra más larga que has terminado, cuántas carreras pasadas tienes registradas y cuántos años de histórico hay — no hace falta que lo indiques a mano, y afecta a cuánta carga y qué tan rápido sube el plan.',
+      source: 'Inferido del historial de actividades y carreras pasadas registradas en tu cuenta',
     },
     {
       title: 'Estimación de ritmo de carrera',
@@ -112,8 +132,8 @@ export const METHOD_GUIDE = {
       source: 'Riegel, P. S. — Athletic records and human endurance (ley de potencia distancia-tiempo)',
     },
     {
-      title: 'Fuerza excéntrica',
-      text: 'Las sesiones de fuerza priorizan el control del frenado (bajadas, step-downs excéntricos) porque es lo que más protege la rodilla y el cuádriceps en terreno técnico.',
+      title: 'Fuerza excéntrica y unilateral',
+      text: 'Las sesiones de fuerza priorizan el control del frenado (step-downs excéntricos) y el trabajo a una pierna (búlgaras, zancadas, elevación de talón/gemelo-sóleo) porque es lo que más protege la rodilla y el tobillo en terreno técnico, y lo que más se parece al gesto real de correr.',
       source: 'Universidad de Innsbruck (vía exerflysport.com) — Eccentric training for trail running',
     },
   ],

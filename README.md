@@ -1,30 +1,34 @@
 # TrailCoach
 
-Tu entrenador personal de ultra trail. Web app privada (funciona como app instalable en el móvil, PWA) pensada para preparar la **CDH 110K (Val d'Aran by UTMB, 9 de julio de 2027)** y el **UTMB**. Los datos se guardan en tu propio servidor, en una base de datos SQLite — nada en la nube de terceros salvo lo que tú conectes (Strava, y opcionalmente la IA de Claude).
+Tu entrenador personal de ultra trail running. Web app privada (funciona como app instalable en el móvil, PWA), pensada específicamente para corredores de ultra trail — no para running de ruta. Es multiusuario: cada persona crea su propia cuenta (email + contraseña) y sus datos se guardan en tu propio servidor, en una base de datos SQLite — nada en la nube de terceros salvo lo que cada usuario conecte (Strava, y opcionalmente la IA de Claude).
 
 ## Qué hace
 
-- Generas un **plan de entrenamiento periodizado** (base → construcción → específico → afinado → carrera → recuperación) a partir de tus carreras objetivo, con tiradas largas, días de doble tirada (back-to-back), desnivel, series, fuerza y descansos.
-- Cargas el **track GPX** de una carrera y calcula distancia, desnivel positivo/negativo, perfil y las subidas/bajadas principales.
-- Cada día haces un **check-in** ("estoy cansado", "me pesan las piernas", "solo tengo 1 hora") y el entreno de hoy se adapta al momento — y si hace falta, se recalcula en cascada el resto del plan para no perder progresión ni duplicar cargas duras.
+- **Motor de entrenamiento basado en metodologías reales de resistencia y ultra trail**, no un calendario genérico de running: combina periodización por bloques, distribución de intensidad polarizada/piramidal, back-to-back long runs y especificidad de montaña, y decide cada semana qué mezcla aplica según tu carrera objetivo, tu nivel (inferido de tu historial), tu disponibilidad y tu fatiga real — no un PDF fijo de 12-16 semanas. Ver `server/methodology.js` y el apartado "¿En qué se basa?" dentro de la propia app para el detalle.
+- La temporada se divide sola en fases **Base → Construcción → Específico → Máxima especificidad (Peak) → Afinado → Carrera → Recuperación**, con una semana de descarga cada 4 semanas de carga.
+- Cada sesión trae explicado **por qué la recibes y qué adaptación busca** (no solo "qué toca hacer"), y cubre en detalle lo propio de ultra trail: tiradas largas, back-to-back, subida corriendo vs power hiking, bajada técnica y trabajo excéntrico, fuerza unilateral y de gemelo/sóleo, uso de bastones, nutrición e hidratación en sesión, entrenamiento con fatiga acumulada, simulacros de carrera y afinado.
+- Cargas el **track GPX** de una carrera y calcula distancia, desnivel positivo/negativo, perfil y las subidas/bajadas principales — el plan prioriza más la bajada técnica cuanto más desnivel negativo tenga tu carrera o más cerca esté.
+- Cada día haces un **check-in** ("estoy cansado", "me pesan las piernas", "solo tengo 1 hora") y el entreno de hoy se adapta al momento — y si hace falta, se recalcula en cascada el resto del plan para no perder progresión ni duplicar cargas duras. Si no haces check-in pero tu carga reciente ya muestra mucha fatiga acumulada, la app te avisa igualmente.
 - Puedes pedir cambios en **lenguaje natural** ("esta semana solo puedo 3 días", "múdame la tirada larga al domingo") y la IA reorganiza el tramo del plan respetando tus sesiones bloqueadas y las reglas de un entrenador (nunca dos días duros seguidos, etc.).
 - La pantalla **Hoy** te dice si vas "en camino" o llevas varios días flojeando (sesiones no hechas o muy recortadas), con un resumen de los últimos 30 días y tus próximos entrenos.
 - Pones tu **objetivo de tiempo** para la carrera y la app te dice si es realista comparado con tu historial y el perfil de la carrera; cerca del día, genera un **plan de carrera** con el reparto de tiempo por tramo, avituallamientos y bases de vida, ritmo objetivo ajustado a cada subida/bajada, y hora estimada de paso por cada punto.
-- Apartado de **nutrición**: registras qué tomaste en cada entreno (gel, minuto, cómo te sentó) y la app te dice qué productos te funcionan y cuáles evitar de cara a la carrera, con objetivos de carbohidrato/sodio por hora según tu peso y la duración prevista.
-- La **fuerza** se adapta a lo que prefieras: gimnasio, rocódromo/escalada, calistenia o circuito en casa — mismos objetivos (piernas de frenado, core, agarre), ejercicios distintos.
-- **Sincroniza con Strava**: importa tus actividades reales, las empareja con lo planificado y calcula tu carga de entrenamiento (Forma/CTL, Fatiga/ATL, Frescura/TSB — el mismo modelo que usan TrainingPeaks o Strava's Fitness & Freshness).
+- Apartado de **nutrición**: registras qué tomaste en cada entreno (gel, minuto, cómo te sentó, con presets de marcas habituales) y la app te dice qué productos te funcionan y cuáles evitar de cara a la carrera, con objetivos de carbohidrato/sodio por hora según tu peso y la duración prevista.
+- La **fuerza** se adapta a lo que prefieras: gimnasio, rocódromo/escalada, calistenia o circuito en casa — mismos objetivos (piernas de frenado, core, agarre), ejercicios distintos, con más peso en el control excéntrico y el trabajo a una pierna cuanto más cerca está la carrera.
+- **Sincroniza con Strava**, automáticamente en segundo plano al abrir la app: importa tus actividades reales, las empareja con lo planificado y calcula tu carga de entrenamiento (Forma/CTL, Fatiga/ATL, Frescura/TSB — el mismo modelo que usan TrainingPeaks o el "Fitness & Freshness" de Strava). Como COROS y Suunto sincronizan de forma nativa con Strava, conectar solo Strava es suficiente para traer tus entrenos de esos relojes también.
+- Estima tu **VO2max aproximado** a partir de tu mejor esfuerzo llano reciente (fórmulas de Jack Daniels y Jimmy Gilbert, las mismas detrás de las tablas VDOT).
+- Foto de perfil real (no un icono), y funciona correctamente como PWA instalada en el móvil (el service worker se actualiza solo, sin tener que reinstalar la app a mano).
 - Guardas tu **historial de carreras pasadas**, que se usa para estimar tu ritmo en la próxima.
 
-Las recomendaciones de nutrición y fuerza están basadas en guías con evidencia (citadas dentro de la propia app, en Nutrición y en Ajustes → fuerza).
+Las recomendaciones de nutrición, fuerza y metodología están basadas en guías con evidencia (citadas dentro de la propia app, en Nutrición, en Ajustes → fuerza, y en Análisis → "¿En qué se basa?").
 
 ## Antes de nada: pruébalo en local
 
 ```bash
 npm install
-APP_PASSWORD=tuclave node server/index.js
+node server/index.js
 ```
 
-Abre `http://localhost:3000`, entra con la contraseña que hayas puesto y añade tu primera carrera en la pestaña **Carreras**. Sin `APP_PASSWORD` la app arranca sin login (solo recomendable en local).
+Abre `http://localhost:3000`, crea tu cuenta (email + contraseña) y añade tu primera carrera en la pestaña **Plan → Carreras**.
 
 ## Desplegarlo en un servidor propio (recomendado)
 
@@ -39,14 +43,14 @@ Necesitas un VPS pequeño (con 1 GB de RAM sobra; Hetzner CX22 ronda 4-5 €/mes
 4. **Configura las variables de entorno**:
    ```bash
    cp .env.example .env
-   nano .env      # rellena DOMAIN, APP_PASSWORD, SESSION_SECRET, y lo opcional
+   nano .env      # rellena DOMAIN, SESSION_SECRET, y lo opcional
    ```
    Genera un secreto de sesión con `openssl rand -hex 32`.
 5. **Levanta todo**:
    ```bash
    docker compose up -d --build
    ```
-   Caddy pedirá el certificado HTTPS automáticamente la primera vez (tarda unos segundos). A partir de ahí, `https://trail.tudominio.com` es tu app, accesible desde el ordenador y desde el móvil.
+   Caddy pedirá el certificado HTTPS automáticamente la primera vez (tarda unos segundos). A partir de ahí, `https://trail.tudominio.com` es tu app, accesible desde el ordenador y desde el móvil — y cada persona que quieras que la use crea su propia cuenta desde ahí.
 6. **Instálala como app en el móvil**: abre esa URL en Chrome (Android) o Safari (iPhone) y usa "Añadir a pantalla de inicio" / "Instalar app". Queda como un icono más, sin barra de navegador.
 
 Para actualizar tras un cambio: `git pull && docker compose up -d --build`.
@@ -54,19 +58,21 @@ Los datos viven en un volumen de Docker (`trailcoach-data`), así que sobreviven
 
 ## Conectar Strava
 
+Cada usuario conecta su propia cuenta de Strava desde su perfil; los tokens se guardan por usuario, no son compartidos.
+
 1. Entra en [strava.com/settings/api](https://www.strava.com/settings/api) y crea una aplicación:
    - **Nombre**: TrailCoach (o lo que quieras).
    - **Website**: `https://trail.tudominio.com`
    - **Authorization Callback Domain**: `trail.tudominio.com` (sin `https://`, sin barra al final).
-2. Strava te da un **Client ID** y un **Client Secret**. Ponlos en tu `.env`:
+2. Strava te da un **Client ID** y un **Client Secret**. Ponlos en tu `.env` (son de la app, no de cada usuario):
    ```
    STRAVA_CLIENT_ID=12345
    STRAVA_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    STRAVA_REDIRECT_URI=https://trail.tudominio.com/api/strava/callback
    ```
-3. Reinicia (`docker compose up -d`), abre la app → pestaña **Historial** → **Conectar con Strava**, autoriza el acceso, y ya puedes sincronizar tus actividades con el botón correspondiente.
+3. Reinicia (`docker compose up -d`), abre la app → pestaña **Historial** → **Conectar con Strava**, autoriza el acceso, y ya puedes sincronizar. A partir de ahí, la app sincroniza sola en segundo plano cada vez que la abres (como mucho cada 20 min), además del botón manual.
 
-Se importan solo tus datos: distancia, tiempo, desnivel y frecuencia cardiaca media, para calcular tu carga de entrenamiento real y compararla con lo planificado.
+Se importan solo tus datos: distancia, tiempo, desnivel y frecuencia cardiaca media, para calcular tu carga de entrenamiento real y compararla con lo planificado. Como COROS y Suunto ya sincronizan de forma nativa con Strava, no hace falta una integración aparte para esos relojes.
 
 ## Activar los ajustes con IA (opcional pero recomendado)
 
@@ -76,24 +82,37 @@ Las reglas fijas del check-in (cansado / piernas pesadas / poco tiempo / enfermo
 2. Añádela a tu `.env`: `ANTHROPIC_API_KEY=sk-ant-...`
 3. Reinicia el contenedor.
 
-El coste de uso personal (unos pocos mensajes al día) suele ser de céntimos al mes.
+El coste de uso personal (unos pocos mensajes al día, por usuario) suele ser de céntimos al mes.
 
 ## Estructura del proyecto
 
 ```
-server/       Backend (Node + Express + SQLite nativo, sin dependencias pesadas)
-  planner.js    Generador del plan periodizado
-  adjust.js     Motor de ajuste diario (reglas + IA)
-  load.js       Modelo de carga de entrenamiento (CTL/ATL/TSB)
-  gpx.js        Lectura de tracks GPX
-  strava.js     Integración con Strava
+server/
+  index.js      Rutas HTTP y autenticación (multiusuario: email + contraseña por cuenta)
+  db.js         Esquema SQLite y acceso a datos
+  methodology.js Selección de metodología: fase de temporada, polarizado/piramidal, nivel del
+                atleta, énfasis de bajada/back-to-back, adaptación continua por fatiga real
+  planner.js    Generador del plan semanal (a partir de lo que decide methodology.js)
+  workouts.js   Traduce cada sesión a título + descripción + "por qué" para el atleta
+  knowledge.js  Guías con evidencia: nutrición, fuerza, metodología, zonas de FC
+  adjust.js     Motor de ajuste diario (check-in con reglas + IA) y recálculo en cascada
+  load.js       Modelo de carga de entrenamiento (TRIMP de Banister → CTL/ATL/TSB)
+  vo2.js        Estimación de VO2max a partir del mejor esfuerzo llano reciente
+  gpx.js        Lectura de tracks GPX (distancia, desnivel, perfil, subidas/bajadas)
+  pacing.js     Plan de carrera: ritmo por tramo, avituallamientos, hora estimada de paso
+  nutrition.js  Registro y recomendaciones de nutrición en carrera
+  adherence.js  Estado de "vas en camino" a partir del cumplimiento reciente del plan
+  strava.js     Integración con Strava (por usuario) y sincronización automática en segundo plano
   claude.js     Cliente de la API de Claude para ajustes en lenguaje natural
 public/       Frontend (PWA en JavaScript puro, sin frameworks)
 ```
 
-## Notas sobre el modelo de entrenamiento
+## Notas sobre el motor de entrenamiento
 
-- La carga de cada sesión se estima con el modelo TRIMP de Banister, usando tu FC media (real, de Strava) o una estimación por tipo de sesión cuando no hay dato.
-- La progresión semanal sube de forma gradual (limitada a tu disponibilidad y horas máximas configuradas) con una semana de asimilación cada 4 semanas de carga.
-- Las semanas de descarga tras una carrera objetivo y el afinado antes de la siguiente se calculan automáticamente según la distancia/desnivel de cada carrera.
+- La carga de cada sesión se estima con el modelo TRIMP de Banister, usando tu FC media (real, de Strava) o una estimación por tipo de sesión cuando no hay dato. De ahí salen Forma (CTL, 42 días), Fatiga (ATL, 7 días) y Frescura (TSB = Forma − Fatiga).
+- La fase de cada semana (Base/Construcción/Específico/Peak/Afinado/Carrera/Recuperación) se calcula sola a partir de cuánto falta para tu próxima carrera objetivo; dentro de cada fase, el modelo de distribución de intensidad cambia entre polarizado y piramidal según lo que la fase necesita (ver `intensityModel()` en `methodology.js`).
+- Tu nivel (principiante/intermedio/avanzado) se infiere del historial real — volumen del último año, ultra más larga terminada, carreras pasadas registradas — no hace falta rellenarlo a mano.
+- Si en el momento de generar o recalcular el plan tu Frescura está muy negativa de verdad (no solo porque el bloque tocase subir), esa semana se recorta automáticamente: es la diferencia entre un calendario fijo y un sistema que mira tus datos reales.
+- La progresión semanal sube de forma gradual (limitada a tu disponibilidad y horas máximas configuradas) con una semana de descarga cada 4 semanas de carga.
+- Las semanas de recuperación tras una carrera objetivo y el afinado antes de la siguiente se calculan automáticamente según la distancia/desnivel de cada carrera.
 - Marca una sesión como **bloqueada** (🔒) para que ni el recálculo automático ni un ajuste por IA la toquen.

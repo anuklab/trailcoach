@@ -4,7 +4,6 @@ services:
     container_name: trailcoach
     restart: unless-stopped
     environment:
-      APP_PASSWORD: ${APP_PASSWORD}
       SESSION_SECRET: ${SESSION_SECRET}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}

@@ -3,7 +3,6 @@
 import { db, log } from './db.js';
 import { activityLoad } from './load.js';
 import { addDays, today } from './util.js';
-import { addKmToActiveShoes } from './gear.js';
 
 const CLIENT_ID = process.env.STRAVA_CLIENT_ID;
 const CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
@@ -107,10 +106,7 @@ export async function syncStrava(userId, { full = false } = {}) {
     if (!acts.length) break;
     for (const a of acts) {
       const row = upsertActivity(userId, a); matchSession(userId, row); total++;
-      if (row.isNew) {
-        newRows.push(row);
-        if (['Run', 'TrailRun'].includes(row.sport_type)) addKmToActiveShoes(userId, (row.distance_m || 0) / 1000);
-      }
+      if (row.isNew) newRows.push(row);
     }
     page++;
     if (page > 30) break;
