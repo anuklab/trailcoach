@@ -1024,6 +1024,7 @@ async function stravaSync(full) {
   const r = await post('/strava/sync', { full });
   toast(`${r.imported} actividades importadas`);
   renderHistorial();
+  if (r.plan_changes && r.plan_changes.length) toast(`Plan adaptado a tu carga real: ${r.plan_changes.length} ajuste(s)`);
   if (r.unlogged_nutrition && r.unlogged_nutrition.length) postSyncNutritionPrompt(r.unlogged_nutrition);
 }
 // Tras sincronizar, pregunta qué se tomó en las actividades nuevas relevantes (>15 min) sin registro todavía.
@@ -1573,6 +1574,7 @@ async function autoSyncStrava() {
     localStorage.setItem('tc_last_autosync', String(Date.now()));
     const r = await post('/strava/sync', { full: false });
     if (r.imported) { toast(`${r.imported} actividad(es) de Strava sincronizadas`); if (currentTab === 'hoy') render('hoy'); if (currentTab === 'historial') render('historial'); }
+    if (r.plan_changes && r.plan_changes.length) { toast(`Plan adaptado a tu carga real: ${r.plan_changes.length} ajuste(s)`); if (currentTab === 'plan') render('plan'); }
     if (r.unlogged_nutrition && r.unlogged_nutrition.length) postSyncNutritionPrompt(r.unlogged_nutrition);
   } catch {}
 }
