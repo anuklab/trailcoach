@@ -4,9 +4,9 @@
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 const ZCOLOR = { Z1: 'var(--z1)', Z2: 'var(--z2)', Z3: 'var(--z3)', Z4: 'var(--z4)', Z5: 'var(--z5)' };
-const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-const DIAS_CORTO = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
-const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+// Los nombres de día/mes ya no son arrays fijos en castellano: daysLong()/daysShort()/monthsShort()
+// /monthsLong() (definidas en i18n.js) devuelven los del idioma activo en cada llamada, para que
+// el calendario, los selectores de día y las fechas formateadas cambien de idioma con el resto.
 
 // ---------------- Iconos (monolínea, sin librerías) ----------------
 const ICONS = {
@@ -46,8 +46,8 @@ function icon(name, cls = '') { return `<svg class="icon ${cls}" viewBox="0 0 24
 const TYPE_ICON = { rest: 'moon', easy: 'wave', recovery: 'droplet', long: 'mountain', b2b: 'repeat',
   vert: 'chevronsUp', tempo: 'clock', intervals: 'bolt', strength: 'dumbbell', race: 'flag', cross: 'bike' };
 
-function fmtDate(d) { const [y, m, day] = d.split('-'); return `${+day} ${MESES[+m - 1]}`; }
-function fmtDateLong(d) { const [y, m, day] = d.split('-'); return `${DIAS[weekday(d)]} ${+day} de ${MESES[+m - 1]}`; }
+function fmtDate(d) { const [y, m, day] = d.split('-'); return `${+day}${t('date_join')}${monthsShort()[+m - 1]}`; }
+function fmtDateLong(d) { const [y, m, day] = d.split('-'); return `${daysLong()[weekday(d)]} ${+day}${t('date_join')}${monthsShort()[+m - 1]}`; }
 function weekday(d) { const dt = new Date(d + 'T00:00:00Z'); return (dt.getUTCDay() + 6) % 7; }
 function todayStr() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function addDays(d, n) { const dt = new Date(d + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + n); return dt.toISOString().slice(0, 10); }
@@ -93,7 +93,7 @@ const AvailUI = {
     const defStart = lastEnd;
     const defEnd = minToTime(timeToMin(lastEnd) + 60);
     return `<div class="avail-day-block">
-      <div class="avail-day-head"><strong>${DIAS[i]}</strong><span class="small ${total ? 'muted' : 'avail-rest'}">${total ? hm(total) : 'Descanso'}</span></div>
+      <div class="avail-day-head"><strong>${daysLong()[i]}</strong><span class="small ${total ? 'muted' : 'avail-rest'}">${total ? hm(total) : t('cal_rest')}</span></div>
       <div class="chip-row">
         ${AVAIL_PRESETS.map(p => `<div class="chip ${windows.some(w => w.s === p.s && w.e === p.e) ? 'selected' : ''}" onclick="AvailUI.togglePreset('${ns}',${i},'${p.s}','${p.e}')">${p.label}</div>`).join('')}
         <div class="chip" onclick="AvailUI.toggleCustomRow('${ns}',${i})">${icon('plus')} Horario</div>
@@ -239,12 +239,12 @@ function closeModals() { $('#modalRoot').innerHTML = ''; }
 
 // ---------------- Tabs ----------------
 const TABS = [
-  { id: 'hoy', label: 'Hoy', icon: 'sun' },
-  { id: 'plan', label: 'Plan', icon: 'calendar' },
-  { id: 'historial', label: 'Historial', icon: 'scroll' },
-  { id: 'analisis', label: 'Análisis', icon: 'chart' },
+  { id: 'hoy', labelKey: 'nav_hoy', icon: 'sun' },
+  { id: 'plan', labelKey: 'nav_plan', icon: 'calendar' },
+  { id: 'historial', labelKey: 'nav_historial', icon: 'scroll' },
+  { id: 'analisis', labelKey: 'nav_analisis', icon: 'chart' },
 ];
-const ALL_VIEWS = [...TABS.map(t => t.id), 'ajustes'];
+const ALL_VIEWS = [...TABS.map(tb => tb.id), 'ajustes'];
 let currentTab = 'hoy';
 function switchTab(tab) {
   currentTab = tab;
@@ -252,11 +252,14 @@ function switchTab(tab) {
   $$('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   render(tab);
 }
-$$('.tabbar button').forEach(b => {
-  const t = TABS.find(x => x.id === b.dataset.tab);
-  b.innerHTML = `${icon(t.icon)}<span>${t.label}</span>`;
-  b.addEventListener('click', () => switchTab(b.dataset.tab));
-});
+function relabelTabbar() {
+  $$('.tabbar button').forEach(b => {
+    const tb = TABS.find(x => x.id === b.dataset.tab);
+    b.innerHTML = `${icon(tb.icon)}<span>${t(tb.labelKey)}</span>`;
+  });
+}
+relabelTabbar();
+$$('.tabbar button').forEach(b => { b.addEventListener('click', () => switchTab(b.dataset.tab)); });
 $('.profile-btn').innerHTML = icon('gear');
 if ($('.support-btn')) $('.support-btn').innerHTML = icon('help');
 // El botón de perfil (arriba a la derecha) muestra tu foto si tienes una subida, y si no,
@@ -350,7 +353,7 @@ async function renderHoy() {
       <h2>Próximos entrenos</h2>
       ${upcoming.slice(0, 5).map(s => `<div class="upcoming-item">
         ${icon(TYPE_ICON[s.type] || 'wave')}
-        <div class="day">${DIAS_CORTO[weekday(s.date)]} ${fmtDate(s.date)}</div>
+        <div class="day">${daysShort()[weekday(s.date)]} ${fmtDate(s.date)}</div>
         <div class="t">${esc(s.title)}</div>
         <div class="d">${s.duration_min ? hm(s.duration_min) : ''}</div>
       </div>`).join('')}
@@ -376,8 +379,8 @@ async function renderHoy() {
 }
 
 function sessionCard(s) {
-  const badge = s.status === 'done' ? '<span class="pill done">Hecho</span>' : s.status === 'partial' ? '<span class="pill partial">Parcial</span>'
-    : s.status === 'missed' ? '<span class="pill missed">No hecho</span>' : '';
+  const badge = s.status === 'done' ? `<span class="pill done">${t('btn_done')}</span>` : s.status === 'partial' ? `<span class="pill partial">${t('btn_partial')}</span>`
+    : s.status === 'missed' ? `<span class="pill missed">${t('btn_notdone')}</span>` : '';
   const key = s.key ? '<span class="pill key">Clave</span>' : '';
   const zones = zoneBar(s.zone);
   const changeNote = s.change_note ? `<p class="small" style="color:var(--accent2)">${icon('edit')} ${esc(s.change_note)}</p>` : '';
@@ -394,11 +397,11 @@ function sessionCard(s) {
     </div>
     ${zones}
     ${s.type !== 'rest' ? `<div class="actions">
-      <button onclick="markStatus(${s.id},'done')">Hecho</button>
-      <button onclick="markStatus(${s.id},'partial')">Parcial</button>
-      <button onclick="markStatus(${s.id},'missed')">No hecho</button>
-      <button onclick="editSessionModal(${s.id})">Editar</button>
-      <button onclick="toggleLock(${s.id}, ${s.locked ? 0 : 1})">${s.locked ? 'Desbloquear' : 'Bloquear'}</button>
+      <button onclick="markStatus(${s.id},'done')">${t('btn_done')}</button>
+      <button onclick="markStatus(${s.id},'partial')">${t('btn_partial')}</button>
+      <button onclick="markStatus(${s.id},'missed')">${t('btn_notdone')}</button>
+      <button onclick="editSessionModal(${s.id})">${t('btn_edit')}</button>
+      <button onclick="toggleLock(${s.id}, ${s.locked ? 0 : 1})">${s.locked ? t('btn_unlock') : t('btn_lock')}</button>
     </div>` : ''}
   </div>`;
 }
@@ -592,16 +595,15 @@ async function deleteSessionConfirm(id) {
 let planMode = 'week'; // 'week' | 'month'
 let planFrom = null;   // ancla: cualquier fecha dentro de la semana/mes que se está viendo
 let planData = null;   // último /plan cargado, para abrir el detalle de un día del calendario
-const MESES_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const CAL_COLOR = {
   easy: 'var(--z1)', recovery: 'var(--z1)', cross: 'var(--z1)',
   long: 'var(--accent)', b2b: 'var(--accent)',
   vert: 'var(--warn)', tempo: 'var(--warn)', intervals: 'var(--warn)',
   strength: 'var(--violet)', race: 'var(--danger)', rest: 'var(--border)',
 };
-const CAL_LEGEND = [
-  ['rest', 'Descanso'], ['easy', 'Suave / recuperación'], ['long', 'Tirada larga'],
-  ['vert', 'Calidad (series, cuestas, tempo)'], ['strength', 'Fuerza'], ['race', 'Carrera'],
+const CAL_LEGEND_KEYS = [
+  ['rest', 'cal_rest'], ['easy', 'cal_easy'], ['long', 'cal_long'],
+  ['vert', 'cal_quality'], ['strength', 'cal_strength'], ['race', 'cal_race'],
 ];
 
 function mondayOf(d) { const wd = weekday(d); return addDays(d, -wd); }
@@ -630,23 +632,23 @@ async function renderPlan() {
   planData = data;
 
   el.innerHTML = `
-    <h1>Plan</h1>
+    <h1>${t('plan_title')}</h1>
     <div class="card tight" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleRaces()">
-      <strong id="racesToggleLabel">Carreras</strong>
+      <strong id="racesToggleLabel">${t('plan_races')}</strong>
       ${icon('flag')}
     </div>
     <div id="planRaces" style="display:none"></div>
 
     <div class="theme-toggle" style="width:100%;margin:14px 0 12px">
-      <button style="flex:1;justify-content:center" class="${planMode === 'week' ? 'active' : ''}" onclick="setPlanMode('week')">Semana</button>
-      <button style="flex:1;justify-content:center" class="${planMode === 'month' ? 'active' : ''}" onclick="setPlanMode('month')">Mes</button>
+      <button style="flex:1;justify-content:center" class="${planMode === 'week' ? 'active' : ''}" onclick="setPlanMode('week')">${t('plan_week')}</button>
+      <button style="flex:1;justify-content:center" class="${planMode === 'month' ? 'active' : ''}" onclick="setPlanMode('month')">${t('plan_month')}</button>
     </div>
 
-    ${data.sessions.length ? (planMode === 'month' ? monthView(from, to) : weekView(from)) : '<div class="list-empty">Sin sesiones. Añade una carrera objetivo primero.</div>'}
+    ${data.sessions.length ? (planMode === 'month' ? monthView(from, to) : weekView(from)) : `<div class="list-empty">${t('plan_no_sessions')}</div>`}
 
     <div class="row" style="margin-top:14px">
-      <button onclick="regenPlan()">${icon('refresh')} Regenerar plan</button>
-      <button class="ghost small" onclick="methodModal()">${icon('info')} ¿En qué se basa?</button>
+      <button onclick="regenPlan()">${icon('refresh')} ${t('plan_regenerate')}</button>
+      <button class="ghost small" onclick="methodModal()">${icon('info')} ${t('plan_based_on')}</button>
     </div>
   `;
 }
@@ -679,12 +681,12 @@ function weekView(from) {
   const isCurrentWeek = from === mondayOf(todayStr());
   return `
     <div class="row" style="margin-bottom:10px">
-      <button onclick="planWeekNav(-7)">← Semana anterior</button>
-      ${!isCurrentWeek ? `<button onclick="planToday()">Hoy</button>` : ''}
-      <button onclick="planWeekNav(7)">Semana siguiente →</button>
+      <button onclick="planWeekNav(-7)">${t('plan_prev_week')}</button>
+      ${!isCurrentWeek ? `<button onclick="planToday()">${t('plan_today')}</button>` : ''}
+      <button onclick="planWeekNav(7)">${t('plan_next_week')}</button>
     </div>
     <div class="week-head">
-      <div><strong>Semana del ${fmtDate(from)}</strong> <span class="phase">${esc(phase)}</span></div>
+      <div><strong>${t('plan_week_of')} ${fmtDate(from)}</strong> <span class="phase">${esc(phase)}</span></div>
       <div class="small muted">${hm(min)} · ${Math.round(dplus)} m D+</div>
     </div>
     ${days.map(d => `
@@ -701,7 +703,7 @@ function monthView(gridFrom, gridTo) {
   for (const s of planData.sessions) (byDay[s.date] ||= []).push(s);
   const monthStart = startOfMonth(planFrom);
   const [y, m] = monthStart.split('-');
-  const monthLabel = `${MESES_LARGO[+m - 1]} ${y}`;
+  const monthLabel = `${monthsLong()[+m - 1]} ${y}`;
   const isCurrentMonth = monthStart === startOfMonth(todayStr());
 
   const cells = [];
@@ -709,17 +711,17 @@ function monthView(gridFrom, gridTo) {
 
   return `
     <div class="row" style="margin-bottom:10px">
-      <button onclick="planMonthNav(-1)">← Mes anterior</button>
-      ${!isCurrentMonth ? `<button onclick="planToday()">Hoy</button>` : ''}
-      <button onclick="planMonthNav(1)">Mes siguiente →</button>
+      <button onclick="planMonthNav(-1)">${t('plan_prev_month')}</button>
+      ${!isCurrentMonth ? `<button onclick="planToday()">${t('plan_today')}</button>` : ''}
+      <button onclick="planMonthNav(1)">${t('plan_next_month')}</button>
     </div>
     <h2 style="text-transform:capitalize">${esc(monthLabel)}</h2>
     <div class="cal-grid">
-      ${DIAS_CORTO.map(d => `<div class="cal-dow">${d}</div>`).join('')}
+      ${daysShort().map(d => `<div class="cal-dow">${d}</div>`).join('')}
       ${cells.map(d => calDayCell(d, byDay[d] || [], d.slice(0, 7) === monthStart.slice(0, 7))).join('')}
     </div>
     <div class="cal-legend">
-      ${CAL_LEGEND.map(([t, label]) => `<span class="cal-legend-item"><span class="cal-dot" style="background:${CAL_COLOR[t]}"></span>${label}</span>`).join('')}
+      ${CAL_LEGEND_KEYS.map(([type, key]) => `<span class="cal-legend-item"><span class="cal-dot" style="background:${CAL_COLOR[type]}"></span>${t(key)}</span>`).join('')}
     </div>
   `;
 }
@@ -763,20 +765,22 @@ async function loadRacesInline() {
 function raceRow(r) {
   const prio = { A: 'Objetivo (A)', B: 'Preparatoria (B)', C: 'Entreno (C)' }[r.priority] || r.priority;
   const isBY = r.type === 'backyard';
+  const isStage = r.type === 'stage';
+  const typeLabel = isBY ? ' · Backyard' : isStage ? ` · Por etapas (${r.n_stages || '?'})` : '';
   return `<div class="card" data-race="${r.id}">
     <div style="display:flex;justify-content:space-between;cursor:pointer" onclick="raceModal(${r.id})">
-      <strong>${esc(r.name)}</strong><span class="pill">${prio}${isBY ? ' · Backyard' : ''}</span>
+      <strong>${esc(r.name)}</strong><span class="pill">${prio}${typeLabel}</span>
     </div>
-    <p class="muted small">${fmtDateLong(r.date)}${!isBY && r.est_h ? ` · previsión ${r.est_h.toFixed(1)} h` : ''}</p>
+    <p class="muted small">${fmtDateLong(r.date)}${!isBY && r.est_h ? ` · previsión ${r.est_h.toFixed(1)} h${isStage ? ' totales' : ''}` : ''}</p>
     <p class="small">${isBY
       ? `${r.dplus_m ? `${Math.round(r.dplus_m)} m D+/vuelta` : '?'}`
-      : `${r.distance_km ? `${r.distance_km} km` : '?'} ${r.dplus_m ? `· ${Math.round(r.dplus_m)} m D+` : ''}`}
+      : `${r.distance_km ? `${r.distance_km} km` : '?'}${isStage ? '/etapa' : ''} ${r.dplus_m ? `· ${Math.round(r.dplus_m)} m D+${isStage ? '/etapa' : ''}` : ''}`}
       ${r.time_limit_h ? `· límite ${r.time_limit_h} h` : ''}</p>
     <div class="target-slot" style="margin:4px 0">${isBY && r.target_time_h ? `<span class="target-badge">${icon('target')} ${r.target_time_h} h objetivo</span>` : ''}</div>
     ${r.profile ? profileSvg(JSON.parse(r.profile)) : ''}
     <div class="row" style="margin-top:8px">
       <button onclick="raceModal(${r.id})">Editar</button>
-      ${!isBY && r.target_time_h ? `<button class="primary" onclick="pacingModal(${r.id})">Plan de carrera</button>` : ''}
+      ${!isBY && !isStage && r.target_time_h ? `<button class="primary" onclick="pacingModal(${r.id})">Plan de carrera</button>` : ''}
     </div>
   </div>`;
 }
@@ -797,19 +801,24 @@ function raceModal(id) {
   const editing = id ? get(`/races`).then(rs => rs.find(r => r.id === id)) : Promise.resolve(null);
   editing.then(r => {
     aidStationsState = r?.aid_stations ? JSON.parse(r.aid_stations) : [];
-    raceModalType = r?.type === 'backyard' ? 'backyard' : 'ultra';
+    raceModalType = ['backyard', 'stage'].includes(r?.type) ? r.type : 'ultra';
     const isBY = raceModalType === 'backyard';
+    const isStage = raceModalType === 'stage';
     openModal(`
       <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
       <h2>${r ? 'Editar carrera' : 'Nueva carrera'}</h2>
       <label>Nombre</label><input id="r-name" value="${r ? esc(r.name) : ''}" placeholder="Nombre de la carrera">
       <label>Tipo de carrera</label>
       <div class="chip-row" id="r-type">
-        <div class="chip ${!isBY ? 'selected' : ''}" data-v="ultra" onclick="raceSetType('ultra')">Carrera de ultra</div>
+        <div class="chip ${!isBY && !isStage ? 'selected' : ''}" data-v="ultra" onclick="raceSetType('ultra')">Carrera de ultra</div>
         <div class="chip ${isBY ? 'selected' : ''}" data-v="backyard" onclick="raceSetType('backyard')">Backyard Ultra</div>
+        <div class="chip ${isStage ? 'selected' : ''}" data-v="stage" onclick="raceSetType('stage')">Carrera por etapas</div>
       </div>
-      <label>Fecha</label><input id="r-date" type="date" value="${r ? r.date : ''}">
+      <label>Fecha ${isStage ? '(de la 1ª etapa)' : ''}</label><input id="r-date" type="date" value="${r ? r.date : ''}">
       <label>Hora de salida</label><input id="r-start" type="time" value="${r?.start_time || ''}">
+      <div id="rf-nstages-wrap" style="display:${isStage ? '' : 'none'}">
+        <label>Número de etapas</label><input id="r-nstages" type="number" inputmode="numeric" min="2" value="${r?.n_stages ?? ''}" placeholder="ej: 5">
+      </div>
       <label>Prioridad</label>
       <select id="r-prio">
         <option value="A" ${r?.priority === 'A' ? 'selected' : ''}>A — Objetivo principal</option>
@@ -817,11 +826,11 @@ function raceModal(id) {
         <option value="C" ${r?.priority === 'C' ? 'selected' : ''}>C — Carrera de entreno</option>
       </select>
       <div class="row">
-        <div id="rf-dist-wrap" style="display:${isBY ? 'none' : ''}"><label>Distancia (km)</label><input id="r-dist" type="number" inputmode="decimal" value="${r?.distance_km ?? ''}"></div>
-        <div><label id="r-dplus-label">${isBY ? 'Desnivel por vuelta (m)' : 'D+ (m)'}</label><input id="r-dplus" type="number" inputmode="numeric" value="${r?.dplus_m ?? ''}"></div>
+        <div id="rf-dist-wrap" style="display:${isBY ? 'none' : ''}"><label id="r-dist-label">${isStage ? 'Distancia media/etapa (km)' : 'Distancia (km)'}</label><input id="r-dist" type="number" inputmode="decimal" value="${r?.distance_km ?? ''}"></div>
+        <div><label id="r-dplus-label">${isBY ? 'Desnivel por vuelta (m)' : isStage ? 'D+ medio/etapa (m)' : 'D+ (m)'}</label><input id="r-dplus" type="number" inputmode="numeric" value="${r?.dplus_m ?? ''}"></div>
       </div>
       <label>Límite de tiempo (horas, opcional)</label><input id="r-limit" type="number" inputmode="decimal" value="${r?.time_limit_h ?? ''}">
-      <label>Tu objetivo de tiempo (horas)</label><input id="r-target" type="number" step="0.1" inputmode="decimal" value="${r?.target_time_h ?? ''}" placeholder="ej: 22">
+      <label>Tu objetivo de tiempo (horas${isStage ? ', total de la carrera' : ''})</label><input id="r-target" type="number" step="0.1" inputmode="decimal" value="${r?.target_time_h ?? ''}" placeholder="ej: 22">
       <label>Track GPX (opcional — calcula distancia, D+ y perfil automáticamente)</label>
       <input id="r-gpx" type="file" accept=".gpx">
       <div id="r-gpx-preview"></div>
@@ -844,7 +853,9 @@ function raceSetType(t) {
   raceModalType = t;
   $$('#r-type .chip').forEach(c => c.classList.toggle('selected', c.dataset.v === t));
   $('#rf-dist-wrap').style.display = t === 'backyard' ? 'none' : '';
-  $('#r-dplus-label').textContent = t === 'backyard' ? 'Desnivel por vuelta (m)' : 'D+ (m)';
+  $('#rf-nstages-wrap').style.display = t === 'stage' ? '' : 'none';
+  $('#r-dist-label').textContent = t === 'stage' ? 'Distancia media/etapa (km)' : 'Distancia (km)';
+  $('#r-dplus-label').textContent = t === 'backyard' ? 'Desnivel por vuelta (m)' : t === 'stage' ? 'D+ medio/etapa (m)' : 'D+ (m)';
 }
 function renderAidList() {
   $('#aidList').innerHTML = aidStationsState.map((a, i) => `
@@ -882,12 +893,14 @@ async function saveRace(id) {
     start_time: $('#r-start').value || null,
     distance_km: raceModalType === 'backyard' ? null : ($('#r-dist').value ? +$('#r-dist').value : null),
     dplus_m: $('#r-dplus').value ? +$('#r-dplus').value : null,
+    n_stages: raceModalType === 'stage' ? (+$('#r-nstages').value || null) : null,
     time_limit_h: $('#r-limit').value ? +$('#r-limit').value : null,
     target_time_h: $('#r-target').value ? +$('#r-target').value : null,
     aid_stations: aidStationsState.filter(a => a.name && a.km),
     notes: $('#r-notes').value,
   };
   if (!body.name || !body.date) { toast('Nombre y fecha son obligatorios'); return; }
+  if (raceModalType === 'stage' && (!body.n_stages || body.n_stages < 2)) { toast('Indica el número de etapas (mínimo 2)'); return; }
   try {
     let race = id ? await patch(`/races/${id}`, body) : await post('/races', body);
     if (gpxParsed) await post(`/races/${race.id}/gpx`, { gpx: await $('#r-gpx').files[0].text() });
@@ -1277,7 +1290,7 @@ async function renderAjustes() {
   const theme = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   const initials = (s.athlete_name || me.email || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || '?';
   el.innerHTML = `
-    <h1>Perfil y ajustes</h1>
+    <h1>${t('settings_title')}</h1>
     <div class="card">
       <div class="profile-head">
         <div class="avatar-circle" id="avatarCircle" onclick="pickAvatar()" title="Subir foto de perfil"
@@ -1285,79 +1298,94 @@ async function renderAjustes() {
           <span class="avatar-edit-dot">${icon('edit')}</span>
         </div>
         <input type="file" id="avatarFile" accept="image/*" style="display:none" onchange="onAvatarFile(this)">
-        <div style="flex:1"><label>Nombre</label><input id="s-name" value="${esc(s.athlete_name || '')}" placeholder="Tu nombre"></div>
+        <div style="flex:1"><label>${t('auth_name')}</label><input id="s-name" value="${esc(s.athlete_name || '')}" placeholder="${t('settings_your_name')}"></div>
       </div>
-      <p class="small muted" style="margin-top:4px">Toca tu avatar para subir una foto${me.avatar ? ' · <span style="text-decoration:underline;cursor:pointer" onclick="removeAvatar()">quitar foto</span>' : ''}.</p>
+      <p class="small muted" style="margin-top:4px">${t('settings_upload_photo')}${me.avatar ? ` · <span style="text-decoration:underline;cursor:pointer" onclick="removeAvatar()">${t('settings_remove_photo')}</span>` : ''}.</p>
       <div class="row" style="margin-top:12px;align-items:center">
-        <span class="small muted" style="flex:1">Tema de la app</span>
+        <span class="small muted" style="flex:1">${t('settings_theme')}</span>
         <div class="theme-toggle">
-          <button type="button" class="${theme === 'dark' ? 'active' : ''}" onclick="setTheme('dark')">${icon('moon')} Noche</button>
-          <button type="button" class="${theme === 'light' ? 'active' : ''}" onclick="setTheme('light')">${icon('sun')} Día</button>
+          <button type="button" class="${theme === 'dark' ? 'active' : ''}" onclick="setTheme('dark')">${icon('moon')} ${t('settings_night')}</button>
+          <button type="button" class="${theme === 'light' ? 'active' : ''}" onclick="setTheme('light')">${icon('sun')} ${t('settings_day')}</button>
         </div>
       </div>
     </div>
     <div class="card">
-      <h2>Objetivo de carrera</h2>
+      <h2>${t('settings_language')}</h2>
+      <p class="muted small">${t('settings_language_hint')}</p>
+      <div class="chip-row" id="s-lang">
+        ${Object.keys(I18N).map(code => `<div class="chip ${currentLang === code ? 'selected' : ''}" data-v="${code}" onclick="changeLanguage('${code}')">${I18N[code].lang_name}</div>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <h2>${t('settings_race_objective')}</h2>
       ${mainRace ? `
-        <p class="small muted">${esc(mainRace.name)} · ${fmtDateLong(mainRace.date)}${mainRace.type === 'backyard' ? ' · Backyard Ultra' : ''}</p>
+        <p class="small muted">${esc(mainRace.name)} · ${fmtDateLong(mainRace.date)}${mainRace.type === 'backyard' ? ' · Backyard Ultra' : mainRace.type === 'stage' ? ' · Por etapas' : ''}</p>
         <p class="small">${mainRace.type === 'backyard'
           ? [mainRace.dplus_m ? `${Math.round(mainRace.dplus_m)} m D+/vuelta` : '', mainRace.target_time_h ? `objetivo ${mainRace.target_time_h} h` : ''].filter(Boolean).join(' · ')
           : [mainRace.distance_km ? `${mainRace.distance_km} km` : '', mainRace.dplus_m ? `${Math.round(mainRace.dplus_m)} m D+` : '', mainRace.target_time_h ? `objetivo ${mainRace.target_time_h} h` : ''].filter(Boolean).join(' · ')}</p>
-        <button style="width:100%;margin-top:8px" onclick="raceModal(${mainRace.id})">Cambiar objetivo</button>
+        <button style="width:100%;margin-top:8px" onclick="raceModal(${mainRace.id})">${t('settings_change_objective')}</button>
       ` : `
-        <p class="small muted">Todavía no tienes una carrera objetivo configurada.</p>
-        <button class="primary" style="width:100%" onclick="raceModal()">Añadir objetivo</button>
+        <p class="small muted">${t('settings_no_objective')}</p>
+        <button class="primary" style="width:100%" onclick="raceModal()">${t('settings_add_objective')}</button>
       `}
     </div>
     <div class="card">
-      <h2>Disponibilidad semanal</h2>
+      <h2>${t('settings_availability')}</h2>
       <p class="muted small">Marca cuándo puedes entrenar cada día: mañana, mediodía, tarde, noche, o un horario a medida (ej: de 6 a 9 y de 17 a 22). Puedes combinar varias franjas el mismo día.</p>
       <div id="availBlock-ajustes">${(() => { AvailUI.init('ajustes', s.availability_windows || s.availability); return AvailUI.render('ajustes'); })()}</div>
-      <label style="margin-top:10px">Horas máximas por semana</label><input id="s-maxh" type="number" inputmode="numeric" value="${s.max_week_hours}">
+      <label style="margin-top:10px">${t('settings_max_hours')}</label><input id="s-maxh" type="number" inputmode="numeric" value="${s.max_week_hours}">
     </div>
     <div class="card">
-      <label>Día habitual de tirada larga</label>
-      <select id="s-longday">${DIAS.map((d, i) => `<option value="${i}" ${i === s.long_day ? 'selected' : ''}>${d}</option>`).join('')}</select>
-      <label>Día de segunda tirada (back-to-back)</label>
-      <select id="s-b2bday">${DIAS.map((d, i) => `<option value="${i}" ${i === s.b2b_day ? 'selected' : ''}>${d}</option>`).join('')}</select>
-      <label><input type="checkbox" id="s-strength" ${s.strength ? 'checked' : ''} style="width:auto"> Incluir sesiones de fuerza</label>
-      <label><input type="checkbox" id="s-poles" ${s.poles ? 'checked' : ''} style="width:auto"> Uso bastones en subidas</label>
+      <label>${t('settings_long_day')}</label>
+      <select id="s-longday">${daysLong().map((d, i) => `<option value="${i}" ${i === s.long_day ? 'selected' : ''}>${d}</option>`).join('')}</select>
+      <label>${t('settings_b2b_day')}</label>
+      <select id="s-b2bday">${daysLong().map((d, i) => `<option value="${i}" ${i === s.b2b_day ? 'selected' : ''}>${d}</option>`).join('')}</select>
+      <label><input type="checkbox" id="s-strength" ${s.strength ? 'checked' : ''} style="width:auto"> ${t('settings_include_strength')}</label>
+      <label><input type="checkbox" id="s-poles" ${s.poles ? 'checked' : ''} style="width:auto"> ${t('settings_use_poles')}</label>
     </div>
     <div class="card">
-      <h2>Cómo quieres hacer la fuerza</h2>
+      <h2>${t('settings_strength_how')}</h2>
       <p class="muted small">${esc(k.strength.summary)}</p>
       <div class="chip-row" id="s-strengthmode">
         ${Object.entries(lib).map(([key, v]) => `<div class="chip ${s.strength_mode === key ? 'selected' : ''}" data-v="${key}">${esc(v.label)}</div>`).join('')}
       </div>
-      <p class="source-note">Fuente: ${esc(k.strength.source)}</p>
+      <p class="source-note">${t('settings_source')}: ${esc(k.strength.source)}</p>
     </div>
     <div class="card">
-      <h2>Frecuencia cardiaca y peso</h2>
-      <div class="row"><div><label>FC máxima</label><input id="s-hrmax" type="number" inputmode="numeric" pattern="[0-9]*" value="${s.hr_max}"></div>
-      <div><label>FC en reposo</label><input id="s-hrrest" type="number" inputmode="numeric" pattern="[0-9]*" value="${s.hr_rest}"></div></div>
-      <label>Peso (kg)</label><input id="s-weight" type="number" inputmode="decimal" pattern="[0-9]*" value="${s.weight_kg || 70}">
+      <h2>${t('settings_hr_weight')}</h2>
+      <div class="row"><div><label>${t('settings_hr_max')}</label><input id="s-hrmax" type="number" inputmode="numeric" pattern="[0-9]*" value="${s.hr_max}"></div>
+      <div><label>${t('settings_hr_rest')}</label><input id="s-hrrest" type="number" inputmode="numeric" pattern="[0-9]*" value="${s.hr_rest}"></div></div>
+      <label>${t('settings_weight')}</label><input id="s-weight" type="number" inputmode="decimal" pattern="[0-9]*" value="${s.weight_kg || 70}">
     </div>
     <div class="card">
-      <h2>Historial de lesiones</h2>
+      <h2>${t('settings_injuries')}</h2>
       <p class="muted small">Lesiones pasadas o crónicas que debamos tener en cuenta (rodilla, tendón de Aquiles, fascitis...). Con algo aquí, el plan sube la carga más despacio, hace descargas más frecuentes y retrasa las sesiones de bajada (las que más castigan la rodilla).</p>
       <textarea id="s-injuries" rows="3" placeholder="Ej: tendinopatía rotuliana en 2024, recuperada pero recae si subo desnivel de golpe.">${esc(s.injury_history || '')}</textarea>
     </div>
-    <button class="primary" style="width:100%" onclick="saveSettings()">Guardar ajustes</button>
+    <button class="primary" style="width:100%" onclick="saveSettings()">${t('settings_save')}</button>
     <div class="card" style="margin-top:20px">
-      <h2>Cuenta</h2>
-      <p class="small muted">Conectado como <strong>${esc(me.email)}</strong></p>
+      <h2>${t('settings_account')}</h2>
+      <p class="small muted">${t('settings_connected_as')} <strong>${esc(me.email)}</strong></p>
       ${billingCardHtml(me.billing)}
-      <button class="danger" style="width:100%;margin-top:6px" onclick="logout()">Cerrar sesión</button>
-      <button class="ghost" style="width:100%;margin-top:8px;color:var(--danger)" onclick="deleteAccountModal()">Eliminar mi cuenta</button>
+      <button class="danger" style="width:100%;margin-top:6px" onclick="logout()">${t('settings_logout')}</button>
+      <button class="ghost" style="width:100%;margin-top:8px;color:var(--danger)" onclick="deleteAccountModal()">${t('settings_delete_account')}</button>
     </div>
     <p class="small muted" style="text-align:center;margin-top:14px">
       TrailCoach · datos guardados en tu propio servidor ·
-      <a href="/terms.html" target="_blank">Términos</a> · <a href="/privacy.html" target="_blank">Privacidad</a>
+      <a href="/terms.html" target="_blank">${t('settings_terms')}</a> · <a href="/privacy.html" target="_blank">${t('settings_privacy')}</a>
     </p>
   `;
   $$('#s-strengthmode .chip').forEach(c => c.addEventListener('click', () => {
     $$('#s-strengthmode .chip').forEach(x => x.classList.remove('selected')); c.classList.add('selected');
   }));
+}
+async function changeLanguage(code) {
+  if (code === currentLang) return;
+  try { await put('/settings', { language: code }); } catch (e) { toast('Error: ' + e.message); return; }
+  setLang(code);
+  applyStaticI18n();
+  relabelTabbar();
+  render(currentTab);
 }
 function deleteAccountModal() {
   openModal(`
@@ -1754,6 +1782,7 @@ function showUpdateBanner(sw) {
   $('#updateBannerBtn').onclick = () => { sw.postMessage('skipWaiting'); el.remove(); };
 }
 async function boot() {
+  applyStaticI18n();
   if (!Auth.token) { showLogin(); return; }
   let me;
   try { me = await get('/me'); }
@@ -1767,6 +1796,7 @@ async function boot() {
   updateProfileBtn(me.avatar);
   let s = null;
   try { s = await get('/settings'); } catch {}
+  if (s && s.language && s.language !== currentLang) { setLang(s.language); applyStaticI18n(); relabelTabbar(); }
   if (s && !s.onboarding_done) { Onboarding.start(me.name || s.athlete_name || ''); return; }
   enterApp();
 }

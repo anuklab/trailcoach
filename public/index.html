@@ -24,51 +24,51 @@
   <div class="login-box card">
     <div class="brand brand-center" style="margin-bottom:10px"><img src="/icons/logo-mark-128.png" alt="TrailCoach"></div>
     <div class="auth-tabs" id="authTabs">
-      <button type="button" id="authTabLogin" class="active" onclick="Auth.showTab('login')">Entrar</button>
-      <button type="button" id="authTabSignup" onclick="Auth.showTab('signup')">Crear cuenta</button>
+      <button type="button" id="authTabLogin" class="active" onclick="Auth.showTab('login')" data-i18n="auth_login">Entrar</button>
+      <button type="button" id="authTabSignup" onclick="Auth.showTab('signup')" data-i18n="auth_signup">Crear cuenta</button>
     </div>
     <div id="authFormLogin">
-      <label>Email</label>
+      <label data-i18n="auth_email">Email</label>
       <input id="loginEmail" type="email" autocomplete="username">
-      <label>Contraseña</label>
+      <label data-i18n="auth_password">Contraseña</label>
       <input id="loginPass" type="password" autocomplete="current-password">
       <p id="loginErr" class="small" style="color:var(--danger)"></p>
-      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.login()">Entrar</button>
-      <p class="small" style="text-align:center;margin-top:10px"><a href="#" onclick="Auth.showTab('forgot');return false">¿Olvidaste tu contraseña?</a></p>
+      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.login()" data-i18n="auth_login">Entrar</button>
+      <p class="small" style="text-align:center;margin-top:10px"><a href="#" onclick="Auth.showTab('forgot');return false" data-i18n="auth_forgot">¿Olvidaste tu contraseña?</a></p>
     </div>
     <div id="authFormSignup" style="display:none">
-      <label>Nombre</label>
+      <label data-i18n="auth_name">Nombre</label>
       <input id="signupName" type="text" autocomplete="name">
-      <label>Email</label>
+      <label data-i18n="auth_email">Email</label>
       <input id="signupEmail" type="email" autocomplete="username">
-      <label>Contraseña</label>
-      <input id="signupPass" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres">
-      <label>Repite la contraseña</label>
-      <input id="signupPass2" type="password" autocomplete="new-password" placeholder="Repite la contraseña">
+      <label data-i18n="auth_password">Contraseña</label>
+      <input id="signupPass" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres" data-i18n-ph="auth_min_chars">
+      <label data-i18n="auth_repeat_password">Repite la contraseña</label>
+      <input id="signupPass2" type="password" autocomplete="new-password" placeholder="Repite la contraseña" data-i18n-ph="auth_repeat_password">
       <p id="signupErr" class="small" style="color:var(--danger)"></p>
-      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.signup()">Crear cuenta</button>
+      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.signup()" data-i18n="auth_signup">Crear cuenta</button>
     </div>
     <div id="authFormForgot" style="display:none">
-      <p class="small muted">Te mandamos un enlace a tu email para elegir una contraseña nueva.</p>
-      <label>Email</label>
+      <p class="small muted" data-i18n="auth_forgot_hint">Te mandamos un enlace a tu email para elegir una contraseña nueva.</p>
+      <label data-i18n="auth_email">Email</label>
       <input id="forgotEmail" type="email" autocomplete="username">
       <p id="forgotErr" class="small" style="color:var(--danger)"></p>
       <p id="forgotOk" class="small" style="color:var(--accent);display:none"></p>
-      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.forgotPassword()">Enviar enlace</button>
-      <p class="small" style="text-align:center;margin-top:10px"><a href="#" onclick="Auth.showTab('login');return false">Volver a entrar</a></p>
+      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.forgotPassword()" data-i18n="auth_send_link">Enviar enlace</button>
+      <p class="small" style="text-align:center;margin-top:10px"><a href="#" onclick="Auth.showTab('login');return false" data-i18n="auth_back_to_login">Volver a entrar</a></p>
     </div>
     <div id="authFormReset" style="display:none">
-      <p class="small muted">Elige tu nueva contraseña.</p>
-      <label>Contraseña nueva</label>
-      <input id="resetPass" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres">
+      <p class="small muted" data-i18n="auth_reset_hint">Elige tu nueva contraseña.</p>
+      <label data-i18n="auth_new_password">Contraseña nueva</label>
+      <input id="resetPass" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres" data-i18n-ph="auth_min_chars">
       <p id="resetErr" class="small" style="color:var(--danger)"></p>
-      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.resetPassword()">Guardar contraseña</button>
+      <button class="primary" style="width:100%;margin-top:10px" onclick="Auth.resetPassword()" data-i18n="auth_save_password">Guardar contraseña</button>
     </div>
     <p class="small muted" style="text-align:center;margin-top:16px">
-      <a href="/terms.html" target="_blank">Términos de uso</a> · <a href="/privacy.html" target="_blank">Privacidad</a>
+      <a href="/terms.html" target="_blank" data-i18n="settings_terms">Términos de uso</a> · <a href="/privacy.html" target="_blank" data-i18n="settings_privacy">Privacidad</a>
     </p>
     <p class="small muted" style="text-align:center;margin-top:6px">
-      ¿Algún problema para entrar? <a href="mailto:martialonso@anuklab.com">Escríbenos</a>
+      <span data-i18n="auth_help">¿Algún problema para entrar?</span> <a href="mailto:martialonso@anuklab.com" data-i18n="auth_write_us">Escríbenos</a>
     </p>
   </div>
 </div>
@@ -111,6 +111,7 @@
 <div id="modalRoot"></div>
 <div id="toastRoot"></div>
 
+<script src="/i18n.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>
