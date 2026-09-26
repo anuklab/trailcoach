@@ -444,11 +444,16 @@ async function submitRpe(id, rpe) {
   } catch (e) { toast('Error: ' + e.message); }
 }
 
+// Franja de colores = zonas de frecuencia cardiaca del entreno (Z1 más suave -> Z5 más duro).
+// Antes eran solo colores sin explicación; ahora llevan la letra de la zona debajo y, al tocarla,
+// abren la leyenda con los rangos de pulsaciones reales (zoneModal), igual que el texto "Z1-Z2".
 function zoneBar(zone) {
   if (!zone || zone === '-') return '';
   const parts = zone.split('-');
-  if (parts.length < 2) return `<div class="zonebar"><div style="flex:1;background:${ZCOLOR[parts[0]] || '#333'}"></div></div>`;
-  return `<div class="zonebar">${parts.map(z => `<div style="flex:1;background:${ZCOLOR[z] || '#333'}"></div>`).join('')}</div>`;
+  return `<div class="zonebar-wrap" onclick="event.stopPropagation();zoneModal('${zone}')">
+    <div class="zonebar">${parts.map(z => `<div style="flex:1;background:${ZCOLOR[z] || '#333'}"></div>`).join('')}</div>
+    <div class="zonebar-labels">${parts.map(z => `<span style="flex:1">${esc(z)}</span>`).join('')}</div>
+  </div>`;
 }
 
 async function markStatus(id, status) {
@@ -580,18 +585,49 @@ async function deleteSessionConfirm(id) {
 }
 
 // =================== PLAN ===================
-let planFrom = null;
+// Dos vistas: "Semana" (una semana completa, navegable día a día de un tirón) y
+// "Mes" (calendario para ver de un vistazo descansos, tiradas largas, calidad, etc.
+// sin tener que abrir cada día). Los colores del calendario y de la franja de zona
+// de cada sesión se explican siempre con una leyenda — nada de colores sin significado.
+let planMode = 'week'; // 'week' | 'month'
+let planFrom = null;   // ancla: cualquier fecha dentro de la semana/mes que se está viendo
+let planData = null;   // último /plan cargado, para abrir el detalle de un día del calendario
+const MESES_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const CAL_COLOR = {
+  easy: 'var(--z1)', recovery: 'var(--z1)', cross: 'var(--z1)',
+  long: 'var(--accent)', b2b: 'var(--accent)',
+  vert: 'var(--z4)', tempo: 'var(--z4)', intervals: 'var(--z4)',
+  strength: 'var(--accent2)', race: 'var(--danger)', rest: 'var(--border)',
+};
+const CAL_LEGEND = [
+  ['rest', 'Descanso'], ['easy', 'Suave / recuperación'], ['long', 'Tirada larga'],
+  ['vert', 'Calidad (series, cuestas, tempo)'], ['strength', 'Fuerza'], ['race', 'Carrera'],
+];
+
+function mondayOf(d) { const wd = weekday(d); return addDays(d, -wd); }
+function startOfMonth(d) { return d.slice(0, 8) + '01'; }
+function endOfMonth(d) { const [y, m] = d.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); }
+function addMonths(d, n) { const [y, m, day] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1 + n, Math.min(day, 28))).toISOString().slice(0, 10); }
+
 async function renderPlan() {
   const el = $('#view-plan');
-  if (!planFrom) planFrom = mondayOf(todayStr());
+  if (!planFrom) planFrom = todayStr();
   el.innerHTML = `<div class="list-empty">Cargando…</div>`;
-  let data;
-  try { data = await get(`/plan?from=${planFrom}&to=${addDays(planFrom, 27)}`); }
-  catch (e) { el.innerHTML = `<div class="card">Error: ${esc(e.message)}</div>`; return; }
 
-  const byWeek = {};
-  for (const s of data.sessions) (byWeek[s.week_start] ||= []).push(s);
-  const weeks = Object.keys(byWeek).sort();
+  let from, to;
+  if (planMode === 'month') {
+    const ms = startOfMonth(planFrom), me = endOfMonth(planFrom);
+    from = mondayOf(ms);
+    to = addDays(me, 6 - weekday(me));
+  } else {
+    from = mondayOf(planFrom);
+    to = addDays(from, 6);
+  }
+
+  let data;
+  try { data = await get(`/plan?from=${from}&to=${to}`); }
+  catch (e) { el.innerHTML = `<div class="card">Error: ${esc(e.message)}</div>`; return; }
+  planData = data;
 
   el.innerHTML = `
     <h1>Plan</h1>
@@ -601,38 +637,54 @@ async function renderPlan() {
     </div>
     <div id="planRaces" style="display:none"></div>
 
-    <div class="row" style="margin:12px 0 8px">
-      <button onclick="planNav(-28)">← Antes</button>
-      <button class="primary" onclick="regenPlan()">Regenerar plan</button>
-      <button onclick="planNav(28)">Después →</button>
+    <div class="theme-toggle" style="width:100%;margin:14px 0 12px">
+      <button style="flex:1;justify-content:center" class="${planMode === 'week' ? 'active' : ''}" onclick="setPlanMode('week')">Semana</button>
+      <button style="flex:1;justify-content:center" class="${planMode === 'month' ? 'active' : ''}" onclick="setPlanMode('month')">Mes</button>
     </div>
-    <button class="ghost small" style="margin-bottom:8px" onclick="methodModal()">${icon('info')} ¿En qué se basa este plan?</button>
-    ${weeks.map(ws => weekBlock(ws, byWeek[ws])).join('') || '<div class="list-empty">Sin sesiones. Añade una carrera objetivo primero.</div>'}
+
+    ${data.sessions.length ? (planMode === 'month' ? monthView(from, to) : weekView(from)) : '<div class="list-empty">Sin sesiones. Añade una carrera objetivo primero.</div>'}
+
+    <div class="row" style="margin-top:14px">
+      <button onclick="regenPlan()">${icon('refresh')} Regenerar plan</button>
+      <button class="ghost small" onclick="methodModal()">${icon('info')} ¿En qué se basa?</button>
+    </div>
   `;
 }
+function setPlanMode(mode) { planMode = mode; renderPlan(); }
+function planWeekNav(n) { planFrom = addDays(mondayOf(planFrom), n); renderPlan(); }
+function planMonthNav(n) { planFrom = addMonths(startOfMonth(planFrom), n); renderPlan(); }
+function planToday() { planFrom = todayStr(); renderPlan(); }
+
 let racesOpen = false;
 function toggleRaces() {
   racesOpen = !racesOpen;
   $('#planRaces').style.display = racesOpen ? 'block' : 'none';
   if (racesOpen) loadRacesInline();
 }
-function mondayOf(d) { const wd = weekday(d); return addDays(d, -wd); }
-function planNav(n) { planFrom = addDays(planFrom, n); renderPlan(); }
 async function regenPlan() {
   if (!confirm('Esto regenera el plan futuro (mantiene lo bloqueado, editado a mano o ya hecho). ¿Continuar?')) return;
   const r = await post('/plan/generate', {});
   toast(`Plan generado: ${r.sessions} sesiones, ${r.weeks} semanas`);
   renderPlan();
 }
-function weekBlock(ws, sessions) {
-  const min = sessions.reduce((a, s) => a + (s.duration_min || 0), 0);
-  const dplus = sessions.reduce((a, s) => a + (s.dplus_m || 0), 0);
-  const phase = sessions.find(s => s.phase)?.phase || '';
-  const byDay = {}; for (const s of sessions) (byDay[s.date] ||= []).push(s);
+
+// ---- Vista semana: una semana completa, día a día ----
+function weekView(from) {
+  const byDay = {};
+  for (const s of planData.sessions) (byDay[s.date] ||= []).push(s);
   const days = Object.keys(byDay).sort();
+  const min = planData.sessions.reduce((a, s) => a + (s.duration_min || 0), 0);
+  const dplus = planData.sessions.reduce((a, s) => a + (s.dplus_m || 0), 0);
+  const phase = planData.sessions.find(s => s.phase)?.phase || '';
+  const isCurrentWeek = from === mondayOf(todayStr());
   return `
+    <div class="row" style="margin-bottom:10px">
+      <button onclick="planWeekNav(-7)">← Semana anterior</button>
+      ${!isCurrentWeek ? `<button onclick="planToday()">Hoy</button>` : ''}
+      <button onclick="planWeekNav(7)">Semana siguiente →</button>
+    </div>
     <div class="week-head">
-      <div><strong>Semana del ${fmtDate(ws)}</strong> <span class="phase">${esc(phase)}</span></div>
+      <div><strong>Semana del ${fmtDate(from)}</strong> <span class="phase">${esc(phase)}</span></div>
       <div class="small muted">${hm(min)} · ${Math.round(dplus)} m D+</div>
     </div>
     ${days.map(d => `
@@ -641,6 +693,53 @@ function weekBlock(ws, sessions) {
         ${byDay[d].map(sessionCard).join('')}
       </div>`).join('')}
   `;
+}
+
+// ---- Vista mes: calendario para ver de un vistazo descansos, tiradas, calidad... ----
+function monthView(gridFrom, gridTo) {
+  const byDay = {};
+  for (const s of planData.sessions) (byDay[s.date] ||= []).push(s);
+  const monthStart = startOfMonth(planFrom);
+  const [y, m] = monthStart.split('-');
+  const monthLabel = `${MESES_LARGO[+m - 1]} ${y}`;
+  const isCurrentMonth = monthStart === startOfMonth(todayStr());
+
+  const cells = [];
+  for (let d = gridFrom; d <= gridTo; d = addDays(d, 1)) cells.push(d);
+
+  return `
+    <div class="row" style="margin-bottom:10px">
+      <button onclick="planMonthNav(-1)">← Mes anterior</button>
+      ${!isCurrentMonth ? `<button onclick="planToday()">Hoy</button>` : ''}
+      <button onclick="planMonthNav(1)">Mes siguiente →</button>
+    </div>
+    <h2 style="text-transform:capitalize">${esc(monthLabel)}</h2>
+    <div class="cal-grid">
+      ${DIAS_CORTO.map(d => `<div class="cal-dow">${d}</div>`).join('')}
+      ${cells.map(d => calDayCell(d, byDay[d] || [], d.slice(0, 7) === monthStart.slice(0, 7))).join('')}
+    </div>
+    <div class="cal-legend">
+      ${CAL_LEGEND.map(([t, label]) => `<span class="cal-legend-item"><span class="cal-dot" style="background:${CAL_COLOR[t]}"></span>${label}</span>`).join('')}
+    </div>
+  `;
+}
+function calDayCell(d, sessions, inMonth) {
+  const isToday = d === todayStr();
+  const real = sessions.filter(s => s.type !== 'rest');
+  const main = real.find(s => s.key) || real[0];
+  const dotType = main ? main.type : (sessions.length ? 'rest' : null);
+  const dot = dotType ? `<span class="cal-dot" style="background:${CAL_COLOR[dotType] || 'var(--muted)'}"></span>` : '';
+  return `<div class="cal-day ${inMonth ? '' : 'dim'} ${isToday ? 'today' : ''}" onclick="openDayDetail('${d}')">
+    <span class="cal-daynum">${+d.slice(8, 10)}</span>${dot}
+  </div>`;
+}
+function openDayDetail(d) {
+  const sessions = (planData?.sessions || []).filter(s => s.date === d);
+  openModal(`
+    <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+    <h2>${fmtDateLong(d)}</h2>
+    ${sessions.map(sessionCard).join('') || '<p class="muted">Sin datos para este día.</p>'}
+  `, { center: true });
 }
 
 // =================== CARRERAS (sección dentro de Plan) ===================
