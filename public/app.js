@@ -422,7 +422,26 @@ async function sessionDetailModal(id) {
         <div class="z-badge" style="background:${ZCOLOR[z.zone]}">${z.zone}</div>
         <div class="z-info"><strong>${esc(z.name)}</strong><span class="small muted">${z.bpm[0]}–${z.bpm[1]} ppm</span></div>
       </div>`).join('')}` : ''}
+    ${['done', 'partial'].includes(s.status) && s.type !== 'rest' ? rpeBlockHtml(s) : ''}
   `, { center: true });
+}
+// ¿Cómo de duro se sintió? Cierra el ciclo planificado-vs-percibido: si el atleta dice que fue
+// mucho más duro de lo que tocaba para esa zona, el motor suaviza automáticamente lo siguiente
+// (ver /api/sessions/:id/rpe y applyRpeFeedback en el servidor).
+function rpeBlockHtml(s) {
+  if (s.rpe) return `<div class="divider"></div><p class="small">Esfuerzo percibido registrado: <strong>${esc(s.rpe)}/10</strong></p>`;
+  return `<div class="divider"></div>
+    <h3 style="text-transform:none;color:var(--text);font-size:.95rem">¿Cómo de duro se sintió? (RPE)</h3>
+    <p class="small muted">1 = paseo, 10 = el esfuerzo más duro posible.</p>
+    <div class="chip-row" id="rpe-chips">${Array.from({ length: 10 }, (_, i) => i + 1).map(n => `<div class="chip" data-v="${n}" onclick="submitRpe(${s.id},${n})">${n}</div>`).join('')}</div>`;
+}
+async function submitRpe(id, rpe) {
+  try {
+    const r = await post(`/sessions/${id}/rpe`, { rpe });
+    toast(r.changes && r.changes.length ? `Gracias — como salió más duro de lo esperado, se suaviza la siguiente sesión de calidad` : 'Gracias, RPE registrado');
+    closeModals();
+    render(currentTab);
+  } catch (e) { toast('Error: ' + e.message); }
 }
 
 function zoneBar(zone) {
