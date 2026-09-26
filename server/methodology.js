@@ -90,12 +90,21 @@ export function progressionProfile(userId) {
 // de seguir subiendo volumen o umbral.
 export function phaseForWeek(ws, races) {
   const we = addDays(ws, 6);
-  const main = races.filter(r => r.priority !== 'C');
-  const inWeek = main.find(r => r.date >= ws && r.date <= we);
+  // Toda la periodización (base/build/específico/peak/taper) se construye SIEMPRE alrededor del
+  // objetivo A — nunca de una B, aunque caiga antes. Las B/C son "carreras puente": se insertan
+  // localmente donde caigan (ver buildWeek en planner.js) sin desviar el macrociclo de A. Si
+  // todavía no hay A puesta, usamos la B más próxima como referencia provisional para que el plan
+  // funcione igualmente (mejor periodizar hacia algo que hacia nada).
+  const asObj = races.filter(r => r.priority === 'A');
+  const main = asObj.length ? asObj : races.filter(r => r.priority === 'B');
+  // Una carrera por etapas ocupa varios días seguidos (a veces más de una semana natural): la
+  // semana entera es "de carrera" mientras se solape con el rango [inicio, inicio + nº etapas - 1].
+  const raceSpanEnd = r => r.type === 'stage' && r.n_stages > 1 ? addDays(r.date, r.n_stages - 1) : r.date;
+  const inWeek = main.find(r => r.date <= we && raceSpanEnd(r) >= ws);
   if (inWeek) return { phase: 'race', race: inWeek };
-  const prev = main.filter(r => r.date < ws).pop();
+  const prev = main.filter(r => raceSpanEnd(r) < ws).pop();
   if (prev) {
-    const weeksAfter = Math.ceil(diffDays(mondayOf(prev.date), ws) / 7);
+    const weeksAfter = Math.ceil(diffDays(mondayOf(raceSpanEnd(prev)), ws) / 7);
     // Un Backyard Ultra siempre exige una recuperación grande, corra lo que corra el atleta: son
     // horas y horas de esfuerzo repetido (a menudo de noche, con privación de sueño), no algo que
     // se mida bien con la fórmula distancia+desnivel de una ultra de recorrido fijo.
@@ -158,20 +167,22 @@ export function selectMethodology(userId, ws, ph) {
   const raceSimulation = phase === 'peak';
   const downhillEmphasis = vertHeavy || phase === 'specific' || phase === 'peak';
   const progression = progressionProfile(userId);
+  const isStage = race?.type === 'stage';
 
   return {
     phase, race, athlete, weeksToRace, intensity: im, overloaded,
-    b2bPriority, raceSimulation, downhillEmphasis, vertHeavy, progression,
-    rationale: buildRationale({ phase, im, athlete, weeksToRace, overloaded, race, vertHeavy, progression }),
+    b2bPriority, raceSimulation, downhillEmphasis, vertHeavy, progression, isStage,
+    rationale: buildRationale({ phase, im, athlete, weeksToRace, overloaded, race, vertHeavy, progression, isStage }),
   };
 }
 
-function buildRationale({ phase, im, athlete, weeksToRace, overloaded, race, vertHeavy, progression }) {
+function buildRationale({ phase, im, athlete, weeksToRace, overloaded, race, vertHeavy, progression, isStage }) {
   const bits = [];
   bits.push(`Fase ${PHASE_LABEL[phase]}${weeksToRace != null && race ? ` — ${weeksToRace} semana(s) para ${race.name}` : ''}.`);
   bits.push(`Distribución de intensidad: ${im.model} (${im.why})`);
   bits.push(`Nivel estimado a partir de tu historial: ${athlete.level} (~${Math.round(athlete.weeklyMin / 60)} h/semana de media, ${athlete.longestUltra || 0} km tu ultra más larga).`);
   if (vertHeavy) bits.push('Tu carrera objetivo es muy de montaña (>25 m D+/km de media): se prioriza el desnivel sobre el ritmo llano.');
+  if (isStage) bits.push('Tu objetivo es una carrera por etapas: se priorizan los bloques de días consecutivos con fatiga acumulada sobre una única tirada larga.');
   if (overloaded) bits.push('Esta semana tu Frescura está muy negativa: se reduce la intensidad aunque el bloque tocase subir carga.');
   for (const r of progression?.reasons || []) bits.push(r.charAt(0).toUpperCase() + r.slice(1));
   return bits;

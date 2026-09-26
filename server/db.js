@@ -145,6 +145,10 @@ ensureColumn('races', 'start_time', 'TEXT');
 // desnivel/distancia fijo por vuelta, hasta quedar el/la última en pie — "Last Man Standing").
 // En una backyard, dplus_m se reutiliza para guardar el D+ de una sola vuelta, no el total.
 ensureColumn('races', 'type', "TEXT DEFAULT 'ultra'");
+// 'stage': carrera por etapas (Marathon des Sables y similares). distance_km/dplus_m se reutilizan
+// como la distancia/desnivel de UNA etapa media (igual que dplus_m en backyard es el de una vuelta);
+// n_stages es el nº de etapas y target_time_h el objetivo de tiempo TOTAL sumando todas las etapas.
+ensureColumn('races', 'n_stages', 'INTEGER');
 for (const t of ['races', 'past_races', 'activities', 'sessions', 'checkins', 'nutrition_logs']) {
   ensureColumn(t, 'user_id', 'INTEGER');
 }

@@ -110,12 +110,14 @@ export function describe(s, ctx = {}) {
         (poles ? ' Lleva bastones y practica plegarlos/desplegarlos sin parar.' : '') +
         fuelNote(s.duration_min, weight) +
         (nightRace ? ' Si puedes, arranca al atardecer o lleva el frontal para practicar correr con luz artificial: en tu carrera pasarás horas de noche.' : '') +
-        (race?.type === 'backyard' ? ' Aunque hoy no cuentes vueltas, mete algún tramo caminando fuerte a propósito: en el Backyard el ritmo lo manda el reloj, no tus piernas.' : '');
+        (race?.type === 'backyard' ? ' Aunque hoy no cuentes vueltas, mete algún tramo caminando fuerte a propósito: en el Backyard el ritmo lo manda el reloj, no tus piernas.' : '') +
+        (s.stageOf > 1 ? ` Día 1 de un bloque de ${s.stageOf} días seguidos: hoy sales con las piernas frescas, pero piensa ya en mañana — no lo gastes todo.` : '');
       break;
     case 'b2b':
       desc = `${hm(s.duration_min)} suave-moderado el día después de la tirada larga, a propósito con las piernas cargadas y sin recuperar del todo. Es el entreno más específico de ultra: enseña al cuerpo a seguir moviéndose bien fatigado, que es justo lo que te pedirá la segunda mitad de la carrera.` +
         fuelNote(s.duration_min, weight) +
-        (race?.type === 'backyard' ? ' En Backyard esto es doblemente específico: es la mejor forma de entrenar días consecutivos de fatiga acumulada sin someter al cuerpo a una única tirada gigante.' : '');
+        (race?.type === 'backyard' ? ' En Backyard esto es doblemente específico: es la mejor forma de entrenar días consecutivos de fatiga acumulada sin someter al cuerpo a una única tirada gigante.' : '') +
+        (s.stageOf > 1 ? ` Día ${s.stageDay} de ${s.stageOf} de tu bloque de etapas: cuida pies (cambia calcetines si notas rozadura), hidratación/electrolitos y la cena/sueño de esta noche tanto como la propia sesión — así es como se sobrevive a una carrera por etapas.` : '');
       break;
     case 'loop': {
       const lapMin = 60; // 1 vuelta = 1 hora en punto, por definición del formato Backyard
@@ -154,7 +156,18 @@ export function describe(s, ctx = {}) {
       desc = `${hm(s.duration_min)} de entreno cruzado (bici, elíptica o nado) en Z2, para sumar carga aeróbica sin el impacto de correr — útil si arrastras molestias.`;
       break;
     case 'race':
-      if (s.raceC) { title = `Carrera: ${s.raceC.name}`; desc = `${s.raceC.distance_km ?? '?'} km${s.raceC.dplus_m ? `, ${s.raceC.dplus_m} m D+` : ''}. Carrera de entreno: úsala como simulacro real — mismo material, misma estrategia de alimentación que en tu objetivo.`; }
+      if (s.stageOf > 1) {
+        title = `Etapa ${s.stageDay}/${s.stageOf}: ${race?.name || ''}`;
+        desc = `${s.distance_km ?? '?'} km${s.dplus_m ? `, ${Math.round(s.dplus_m)} m D+` : ''}. Carrera por etapas: reparte el esfuerzo pensando en la etapa de MAÑANA, no solo en la de hoy — cuida pies (cambio de calcetines/tratamiento de rozaduras nada más terminar), hidratación y electrolitos, y la comida y el sueño en el vivac tanto como el propio correr.` +
+          (s.stageDay === s.stageOf ? ' Última etapa: aquí sí puedes soltarte un poco más, ya no hay "mañana" que proteger.' : '');
+      }
+      else if (s.raceC) {
+        const isB = s.raceC.priority === 'B';
+        title = `${isB ? 'Carrera preparatoria' : 'Carrera de entreno'}: ${s.raceC.name}`;
+        desc = isB
+          ? `${s.raceC.distance_km ?? '?'} km${s.raceC.dplus_m ? `, ${s.raceC.dplus_m} m D+` : ''}. Objetivo B: es una carrera real, corre para hacerlo bien — pero sin comprometer tu progresión hacia tu objetivo principal. Úsala también como ensayo general de material y alimentación.`
+          : `${s.raceC.distance_km ?? '?'} km${s.raceC.dplus_m ? `, ${s.raceC.dplus_m} m D+` : ''}. Carrera de entreno: úsala como simulacro real — mismo material, misma estrategia de alimentación que en tu objetivo.`;
+      }
       else if (race?.type === 'backyard') {
         title = `Carrera objetivo: ${race.name}`;
         desc = `Backyard Ultra${race.dplus_m ? ` — ${race.dplus_m} m D+ por vuelta` : ''}. Objetivo: ${race.target_time_h || '?'} h (≈${race.target_time_h ? Math.round(race.target_time_h) : '?'} vueltas). ¡El gran día! Sal siempre relajado en cada vuelta, no corras nunca solo por entrar antes al corral, come y bebe todas las vueltas aunque no tengas hambre, y piensa en la siguiente vuelta, no en cuántas quedan.`;

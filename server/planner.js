@@ -89,6 +89,14 @@ function racesForUser(userId) {
       // nº de horas/vueltas que el atleta se plantea aguantar (target_time_h).
       return { ...r, est_h: r.target_time_h || 24 };
     }
+    if (r.type === 'stage') {
+      // En una carrera por etapas distance_km/dplus_m guardan la etapa MEDIA (igual que dplus_m en
+      // backyard es el de una sola vuelta); para estimar el tiempo total usamos el esfuerzo
+      // acumulado de todas las etapas juntas.
+      const n = r.n_stages || 1;
+      const est = estimateRaceHours(userId, { ...r, distance_km: (r.distance_km || 0) * n, dplus_m: (r.dplus_m || 0) * n });
+      return { ...r, est_h: r.target_time_h || est };
+    }
     return { ...r, est_h: estimateRaceHours(userId, r) };
   });
 }
@@ -192,6 +200,26 @@ function buildWeek(w) {
   const raceHere = w.races.filter(r => r.date >= ws && r.date <= days[6]);
   if (phase === 'race') {
     const r = w.race; const ri = weekday(r.date);
+    // Carrera por etapas: una sesión "race" por cada etapa. Usamos el desfase en días de calendario
+    // (no el día de la semana) para que funcione igual si la carrera empezó la semana anterior — así
+    // una carrera de más de 7 días, o que no empieza en lunes, reparte bien sus etapas entre semanas
+    // en vez de perder las que caen "fuera" de la semana de inicio.
+    if (r.type === 'stage' && (r.n_stages || 1) > 1) {
+      const n = r.n_stages;
+      const perStageH = (r.est_h || n * 5) / n;
+      for (let i = 0; i < 7; i++) {
+        const off = diffDays(r.date, days[i]);
+        if (off >= 0 && off < n) {
+          sessions.push(mk(i, 'race', perStageH * 60, {
+            dplus_m: r.dplus_m || 0, distance_km: r.distance_km, key: true, zone: 'Z2-Z3',
+            stageDay: off + 1, stageOf: n,
+          }));
+        } else if (off === -1) sessions.push(mk(i, 'rest', 0));
+        else if (off < 0) sessions.push(avail[i] ? mk(i, 'easy', Math.min(45, avail[i])) : mk(i, 'rest', 0));
+        else sessions.push(mk(i, 'rest', 0, { variant: off === n ? 'postcarrera' : undefined }));
+      }
+      return finalize(sessions, w);
+    }
     for (let i = 0; i < 7; i++) {
       if (i === ri) sessions.push(mk(i, 'race', (r.est_h || 10) * 60, {
         // En Backyard el D+ del "día de carrera" es acumulado (vueltas x D+/vuelta), no el de una sola vuelta.
@@ -213,8 +241,41 @@ function buildWeek(w) {
   // Back-to-back long runs: se priorizan en específico/peak (máxima especificidad de fatiga
   // acumulada), pero también se usan en construcción si hay disponibilidad, igual que antes.
   const useB2B = ['build', 'specific', 'peak'].includes(phase) && B !== L && avail[B] >= 60 && !methodology.overloaded;
+
+  // Carrera por etapas en específico/peak: en vez de 1 tirada larga + 1 día de b2b, se entrena un
+  // bloque de 2-3 días SEGUIDOS de fatiga acumulada — que es justo lo que exige una carrera por
+  // etapas y lo que ni la tirada larga ni un back-to-back con un día de por medio simulan bien.
+  // Se decide ANTES de elegir días de calidad/fuerza para que esos días respeten el bloque entero.
+  const stageBlockDays = methodology.isStage && ['specific', 'peak'].includes(phase)
+    ? Math.min(3, Math.max(2, w.race.n_stages || 2)) : 0;
+  let remaining = w.weekMin;
+  const plan = {};
+  const stageDaysUsed = [];
+  if (stageBlockDays > 1 && avail[L] >= 60) {
+    let dayIdx = L, prevDur = Math.min(w.longMin, avail[L]);
+    plan[dayIdx] = mk(dayIdx, 'long', prevDur, { key: true, zone: 'Z1-Z2', stageDay: 1, stageOf: stageBlockDays }); remaining -= prevDur;
+    stageDaysUsed.push(dayIdx);
+    for (let d = 2; d <= stageBlockDays; d++) {
+      const next = (dayIdx + 1) % 7;
+      if (!avail[next]) break; // si el atleta no tiene ese día, no forzamos el bloque más allá
+      const dur = Math.min(avail[next], Math.round(prevDur * 0.75));
+      plan[next] = mk(next, 'b2b', dur, { key: true, zone: 'Z1-Z2', stageDay: d, stageOf: stageBlockDays });
+      remaining -= dur; prevDur = dur; dayIdx = next; stageDaysUsed.push(dayIdx);
+    }
+  } else {
+    const longDur = Math.min(w.longMin, avail[L]);
+    plan[L] = mk(L, 'long', longDur, { key: true, zone: 'Z1-Z2' }); remaining -= longDur;
+    stageDaysUsed.push(L);
+    if (useB2B) {
+      const d = Math.min(avail[B], ['specific', 'peak'].includes(phase) ? longDur * 0.6 : Math.min(90, longDur * 0.5));
+      plan[B] = mk(B, 'b2b', d, { key: ['specific', 'peak'].includes(phase), zone: 'Z1-Z2' }); remaining -= d;
+      stageDaysUsed.push(B);
+    }
+  }
+  const blocked = new Set(stageDaysUsed);
+
   const restDays = new Set([0, 1, 2, 3, 4, 5, 6].filter(i => !avail[i]));
-  if (!restDays.size) restDays.add((L + (useB2B ? 2 : 1)) % 7);
+  if (!restDays.size) restDays.add((L + (blocked.size > 1 ? 2 : 1)) % 7);
 
   const baseNQuality = { base: 1, build: 2, specific: 2, peak: 2, taper: 1, recovery: 0 }[phase] ?? 1;
   const nQualityRaw = methodology.overloaded ? Math.max(0, baseNQuality - 1) : (deload ? Math.max(0, baseNQuality - 1) : baseNQuality);
@@ -225,12 +286,14 @@ function buildWeek(w) {
   const baseNStrength = !st.strength ? 0 : { base: 2, build: 2, specific: 1, peak: 1, taper: phase === 'taper' && w.weekMin < 0.7 * 600 ? 0 : 1, recovery: 1 }[phase] ?? 1;
   const nStrength = deload ? Math.max(st.strength ? 1 : 0, baseNStrength - 1) : baseNStrength;
 
-  // Elegir días de calidad: lejos de la tirada larga y separados entre sí
+  // Elegir días de calidad: lejos del bloque de tirada larga (o del bloque de etapas) y separados
+  // entre sí. Sin sesiones de calidad adicionales durante un bloque de etapas: ya es el estímulo
+  // más específico posible de esa semana.
   const quality = [];
-  for (let q = 0; q < nQuality; q++) {
+  for (let q = 0; q < (stageBlockDays > 1 ? 0 : nQuality); q++) {
     let best = -1, bestScore = -1e9;
     for (let i = 0; i < 7; i++) {
-      if (i === L || (useB2B && i === B) || restDays.has(i) || quality.includes(i) || avail[i] < 50) continue;
+      if (blocked.has(i) || restDays.has(i) || quality.includes(i) || avail[i] < 50) continue;
       let sc = avail[i];
       if (Math.abs(i - L) === 1 || (i === 6 && L === 0) || (i === 0 && L === 6)) sc -= 150;
       if (useB2B && Math.abs(i - B) === 1) sc -= 100;
@@ -241,14 +304,6 @@ function buildWeek(w) {
     if (best >= 0) quality.push(best);
   }
 
-  let remaining = w.weekMin;
-  const plan = {};
-  const longDur = Math.min(w.longMin, avail[L]);
-  plan[L] = mk(L, 'long', longDur, { key: true, zone: 'Z1-Z2' }); remaining -= longDur;
-  if (useB2B) {
-    const d = Math.min(avail[B], ['specific', 'peak'].includes(phase) ? longDur * 0.6 : Math.min(90, longDur * 0.5));
-    plan[B] = mk(B, 'b2b', d, { key: ['specific', 'peak'].includes(phase), zone: 'Z1-Z2' }); remaining -= d;
-  }
   // Qué tipo de sesión de calidad toca según fase: base introduce desnivel suave; construcción
   // combina desnivel + series (pieza polarizada); específico y peak combinan desnivel + tempo
   // (pieza piramidal, ya en terreno de carrera); afinado solo mantiene un recuerdo de desnivel.
@@ -286,7 +341,7 @@ function buildWeek(w) {
   const strengthDays = [];
   for (const i of [...quality, 0, 1, 2, 3, 4, 5, 6]) {
     if (strengthDays.length >= nStrength) break;
-    if (strengthDays.includes(i) || i === L || (useB2B && i === B) || (L - i === 1) || (i === 6 && L === 0)) continue;
+    if (strengthDays.includes(i) || blocked.has(i) || (L - i === 1) || (i === 6 && L === 0)) continue;
     if (restDays.has(i) && avail[i] === 0) continue;
     const used = plan[i]?.duration_min || 0;
     if (avail[i] - used >= 30 || (!plan[i] && avail[i] >= 30)) strengthDays.push(i);
@@ -318,10 +373,20 @@ function buildWeek(w) {
     if (!plan[i] && !strengthDays.includes(i)) sessions.push(mk(i, 'rest', 0, { zone: '-' }));
   }
 
-  // Carreras C: sustituyen la sesión de ese día y la tirada larga
-  for (const r of raceHere.filter(r => r.priority === 'C')) {
+  // Carreras B y C que caen en una semana que NO es la del objetivo A: son "carreras puente" — se
+  // insertan sustituyendo su día (y la tirada larga si coincide) SIN cambiar la fase/progresión de
+  // la semana, que sigue orientada al objetivo A. Una B es un objetivo real aunque secundario, así
+  // que además se protege con un día suave antes y uno de recuperación después (una C solo
+  // sustituye su propio día: es un entreno más, aunque sea corriendo una carrera).
+  for (const r of raceHere.filter(r => r.priority === 'B' || r.priority === 'C')) {
     const i = weekday(r.date);
     for (let k = sessions.length - 1; k >= 0; k--) if (sessions[k].date === r.date || sessions[k].type === 'long') sessions.splice(k, 1);
+    if (r.priority === 'B') {
+      const iBefore = (i + 6) % 7, iAfter = (i + 1) % 7;
+      for (let k = sessions.length - 1; k >= 0; k--) if (sessions[k].date === days[iBefore] || sessions[k].date === days[iAfter]) sessions.splice(k, 1);
+      if (iBefore !== i) sessions.push(mk(iBefore, 'easy', Math.min(30, avail[iBefore] || 30), { variant: 'activacion', zone: 'Z1' }));
+      if (iAfter !== i) sessions.push(mk(iAfter, 'recovery', Math.min(30, avail[iAfter] || 30), { zone: 'Z1' }));
+    }
     sessions.push(mk(i, 'race', (r.est_h || 3) * 60, { dplus_m: r.dplus_m || 0, distance_km: r.distance_km, key: true, zone: 'Z3', raceC: r }));
   }
   return finalize(sessions, w);

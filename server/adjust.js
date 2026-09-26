@@ -211,3 +211,39 @@ export function autoAdaptAfterSync(userId, matched, date = today()) {
   log(userId, 'auto-adapt', reason, { tsb: fit.tsb, changes });
   return changes;
 }
+
+// RPE (esfuerzo percibido) medio esperable por zona — no exacto, solo para detectar cuando el
+// atleta sintió la sesión MUCHO más dura de lo que la zona prescrita sugería.
+const EXPECTED_RPE = { Z1: 2, 'Z1-Z2': 3, Z2: 4, 'Z2-Z3': 5, Z3: 6, 'Z3-Z4': 7, Z4: 8, 'Z4-Z5': 9, Z5: 9 };
+
+/**
+ * Guarda el RPE (1-10) que el atleta reporta para una sesión ya hecha y cierra el ciclo
+ * planificado-vs-real con SU percepción, no solo con los datos objetivos de Strava: si el esfuerzo
+ * percibido fue bastante más alto de lo que la zona prescrita hacía esperar (regla del motor de
+ * adaptación: "IF RPE real > RPE objetivo AND rendimiento < esperado THEN reducir la carga
+ * posterior"), suaviza la siguiente sesión de calidad — mismo mecanismo conservador que
+ * autoAdaptAfterSync (como mucho una sesión, nunca bloqueada ni ya tocada a mano/IA).
+ */
+export function applyRpeFeedback(userId, sessionId, rpe) {
+  const s = db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, userId);
+  if (!s) return null;
+  db.prepare('UPDATE sessions SET rpe = ? WHERE id = ? AND user_id = ?').run(String(rpe), sessionId, userId);
+
+  const changes = [];
+  const expected = EXPECTED_RPE[s.zone] ?? 5;
+  const worseThanExpected = s.status === 'partial' || s.status === 'missed';
+  if (rpe - expected >= 3 || (rpe - expected >= 2 && worseThanExpected)) {
+    const reason = `"${s.title}" del ${s.date} se sintió bastante más dura de lo esperado para su zona (RPE ${rpe}/10)`;
+    const next = db.prepare(`SELECT * FROM sessions WHERE user_id = ? AND date > ? AND date <= ?
+        AND type IN (${QUALITY_TYPES.map(() => '?').join(',')}) AND status = 'planned' AND origin = 'plan' AND locked = 0
+        ORDER BY date LIMIT 1`).get(userId, s.date, addDays(s.date, 2), ...QUALITY_TYPES);
+    if (next) {
+      tx(() => {
+        const r = scale(userId, next, 0.85, { origin: 'auto', note: `Ajustada automáticamente: ${reason}.` });
+        if (r) changes.push(`${r.date}: ${next.title} → ${r.title} (${reason}).`);
+      });
+    }
+  }
+  log(userId, 'rpe', `RPE ${rpe} en sesión ${sessionId} (${s.date})`, { expected, changes });
+  return { rpe, changes };
+}

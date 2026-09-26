@@ -8,7 +8,7 @@ import { billingConfigured, createCheckoutSession, createPortalSession, cancelSu
 import { today, addDays, mondayOf, diffDays } from './util.js';
 import { parseGpx } from './gpx.js';
 import { generatePlan, weeksOverview, estimateRaceHours, racesFor, targetFeasibility } from './planner.js';
-import { applyCheckin, editSession, recalcFrom, naturalAdjust } from './adjust.js';
+import { applyCheckin, editSession, recalcFrom, naturalAdjust, applyRpeFeedback } from './adjust.js';
 import { fitnessSeries, currentFitness } from './load.js';
 import { authUrl, exchangeCode, syncStrava, stravaStatus, stravaConfigured, disconnectStrava } from './strava.js';
 import { adherenceStatus, monthSummary } from './adherence.js';
@@ -231,6 +231,16 @@ app.post('/api/sessions/:id/lock', wrap((req, res) => {
   db.prepare('UPDATE sessions SET locked=? WHERE id=? AND user_id=?').run(req.body.locked ? 1 : 0, req.params.id, req.userId);
   res.json({ ok: true });
 }));
+// RPE percibido (1-10) tras la sesión: cierra el ciclo planificado-vs-real con la percepción del
+// propio atleta, no solo con los datos de Strava. Si salió mucho más duro de lo esperado para su
+// zona, suaviza automáticamente la siguiente sesión de calidad (ver applyRpeFeedback en adjust.js).
+app.post('/api/sessions/:id/rpe', wrap((req, res) => {
+  const rpe = Number(req.body?.rpe);
+  if (!Number.isFinite(rpe) || rpe < 1 || rpe > 10) return res.status(400).json({ error: 'RPE debe ser un número de 1 a 10.' });
+  const result = applyRpeFeedback(req.userId, Number(req.params.id), rpe);
+  if (!result) return res.status(404).json({ error: 'Sesión no encontrada' });
+  res.json(result);
+}));
 app.delete('/api/sessions/:id', wrap((req, res) => { db.prepare('DELETE FROM sessions WHERE id=? AND user_id=?').run(req.params.id, req.userId); res.json({ ok: true }); }));
 app.post('/api/sessions', wrap((req, res) => {
   const s = req.body;
@@ -248,29 +258,53 @@ app.get('/api/checkin', wrap((req, res) => res.json(db.prepare('SELECT * FROM ch
 app.post('/api/adjust/ask', wrap(async (req, res) => res.json(await naturalAdjust(req.userId, req.body?.message || '', { date: req.body?.date }))));
 
 // ---------- Carreras ----------
-app.get('/api/races', wrap((req, res) => res.json(racesFor(req.userId))));
+// Objetivos activos = carreras cuya fecha no ha pasado todavía: una vez pasa la fecha de un evento
+// nos "olvidamos" de él como objetivo (no aparece en la lista, no cuenta para los topes de A/B/C).
+// El histórico de planificación no se borra (sigue en la tabla por si el motor necesita mirar hacia
+// atrás), simplemente deja de ofrecerse como carrera activa.
+const RACE_CAPS = { A: 1, B: 3, C: 6 };
+function normalizeRaceType(t) { return ['backyard', 'stage'].includes(t) ? t : 'ultra'; }
+function checkRaceCap(userId, priority, excludeId) {
+  const cap = RACE_CAPS[priority];
+  if (!cap) return null;
+  const row = db.prepare(`SELECT COUNT(*) n FROM races WHERE user_id = ? AND priority = ? AND date >= ? AND id != ?`)
+    .get(userId, priority, today(), excludeId || 0);
+  if (row.n >= cap) {
+    const label = { A: 'un objetivo A (el principal)', B: `${cap} objetivos B (preparatorias)`, C: `${cap} objetivos C (carreras de entreno)` }[priority];
+    return `Ya tienes ${label} activos. Cambia la prioridad de otra carrera o elimínala antes de añadir esta como ${priority}.`;
+  }
+  return null;
+}
+app.get('/api/races', wrap((req, res) => res.json(racesFor(req.userId).filter(r => r.date >= today()))));
 app.post('/api/races', wrap((req, res) => {
   const r = req.body;
-  const info = db.prepare(`INSERT INTO races(user_id,name,date,priority,type,distance_km,dplus_m,dminus_m,time_limit_h,target_time_h,start_time,profile,climbs,aid_stations,notes)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.userId, r.name, r.date, r.priority || 'A', r.type === 'backyard' ? 'backyard' : 'ultra',
+  const priority = r.priority || 'A';
+  const capErr = checkRaceCap(req.userId, priority);
+  if (capErr) return res.status(400).json({ error: capErr });
+  const info = db.prepare(`INSERT INTO races(user_id,name,date,priority,type,distance_km,dplus_m,dminus_m,time_limit_h,target_time_h,start_time,profile,climbs,aid_stations,notes,n_stages)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.userId, r.name, r.date, priority, normalizeRaceType(r.type),
     r.distance_km || null, r.dplus_m || null,
     r.dminus_m || null, r.time_limit_h || null, r.target_time_h || null, r.start_time || null,
     r.profile ? JSON.stringify(r.profile) : null, r.climbs ? JSON.stringify(r.climbs) : null,
-    r.aid_stations ? JSON.stringify(r.aid_stations) : null, r.notes || null);
+    r.aid_stations ? JSON.stringify(r.aid_stations) : null, r.notes || null, r.n_stages || null);
   res.json(db.prepare('SELECT * FROM races WHERE id=? AND user_id=?').get(info.lastInsertRowid, req.userId));
 }));
 app.patch('/api/races/:id', wrap((req, res) => {
   const r = req.body; const cur = db.prepare('SELECT * FROM races WHERE id=? AND user_id=?').get(req.params.id, req.userId);
   if (!cur) return res.status(404).json({ error: 'No encontrada' });
   const merged = { ...cur, ...r };
-  db.prepare(`UPDATE races SET name=?,date=?,priority=?,type=?,distance_km=?,dplus_m=?,dminus_m=?,time_limit_h=?,target_time_h=?,start_time=?,profile=?,climbs=?,aid_stations=?,notes=? WHERE id=? AND user_id=?`)
-    .run(merged.name, merged.date, merged.priority, merged.type === 'backyard' ? 'backyard' : 'ultra',
+  if (merged.priority !== cur.priority) {
+    const capErr = checkRaceCap(req.userId, merged.priority, req.params.id);
+    if (capErr) return res.status(400).json({ error: capErr });
+  }
+  db.prepare(`UPDATE races SET name=?,date=?,priority=?,type=?,distance_km=?,dplus_m=?,dminus_m=?,time_limit_h=?,target_time_h=?,start_time=?,profile=?,climbs=?,aid_stations=?,notes=?,n_stages=? WHERE id=? AND user_id=?`)
+    .run(merged.name, merged.date, merged.priority, normalizeRaceType(merged.type),
       merged.distance_km, merged.dplus_m, merged.dminus_m, merged.time_limit_h,
       merged.target_time_h, merged.start_time,
       typeof merged.profile === 'string' ? merged.profile : JSON.stringify(merged.profile),
       typeof merged.climbs === 'string' ? merged.climbs : JSON.stringify(merged.climbs),
       typeof merged.aid_stations === 'string' ? merged.aid_stations : JSON.stringify(merged.aid_stations),
-      merged.notes, req.params.id, req.userId);
+      merged.notes, merged.n_stages || null, req.params.id, req.userId);
   res.json(db.prepare('SELECT * FROM races WHERE id=? AND user_id=?').get(req.params.id, req.userId));
 }));
 app.delete('/api/races/:id', wrap((req, res) => { db.prepare('DELETE FROM races WHERE id=? AND user_id=?').run(req.params.id, req.userId); res.json({ ok: true }); }));
