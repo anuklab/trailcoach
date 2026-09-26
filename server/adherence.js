@@ -1,9 +1,55 @@
 // "¿En qué punto del camino estoy?" — mide si el atleta está siguiendo el plan
 // o llevando muchos días flojo (sesiones no hechas / recortadas / con ajustes a la baja).
-import { db } from './db.js';
+import { db, getSettings } from './db.js';
 import { addDays, today } from './util.js';
 
 const WINDOW = 14; // días que miramos hacia atrás
+
+// Mensajes de adherencia en los 5 idiomas de la interfaz (nav_hoy, etc. en public/i18n.js).
+// Solo estas 5 plantillas — a diferencia de las descripciones de sesión (generadas en
+// workouts.js), que siguen en castellano por ahora — se traducen aquí porque son un conjunto
+// pequeño y cerrado de mensajes, no prosa libre.
+const ADHERENCE_MSG = {
+  es: {
+    sin_datos: () => 'Aún no hay suficientes datos para valorar tu progresión.',
+    flojeando: (streak) => `Llevas ${streak} días seguidos sin completar entrenos. Es buen momento para preguntarte por qué (¿falta de tiempo, motivación, alguna molestia?) — si necesitas replanificar objetivos, dímelo y lo adaptamos juntos.`,
+    atencion: (pct) => `Vas un poco flojo esta quincena (${pct}% de cumplimiento). No pasa nada por un bache, pero si sigue así conviene ajustar el plan a algo más realista.`,
+    en_camino: (pct) => `Vas muy bien encaminado: ${pct}% de cumplimiento en las últimas dos semanas. Sigue así.`,
+    estable: (pct) => `Progresión estable (${pct}% de cumplimiento). Todo en orden.`,
+  },
+  en: {
+    sin_datos: () => 'Not enough data yet to assess your progress.',
+    flojeando: (streak) => `You've gone ${streak} days in a row without completing a session. It's a good time to ask why (lack of time, motivation, some discomfort?) — if you need to replan your goals, tell me and we'll adjust it together.`,
+    atencion: (pct) => `You're a bit behind this fortnight (${pct}% completion). A rough patch is fine, but if it continues it's worth adjusting the plan to something more realistic.`,
+    en_camino: (pct) => `You're right on track: ${pct}% completion over the last two weeks. Keep it up.`,
+    estable: (pct) => `Steady progress (${pct}% completion). All good.`,
+  },
+  fr: {
+    sin_datos: () => 'Pas encore assez de données pour évaluer ta progression.',
+    flojeando: (streak) => `Ça fait ${streak} jours d'affilée sans terminer une séance. C'est le bon moment de te demander pourquoi (manque de temps, de motivation, une gêne ?) — si tu dois replanifier tes objectifs, dis-le-moi et on ajuste ensemble.`,
+    atencion: (pct) => `Tu es un peu en retrait cette quinzaine (${pct}% de réussite). Un coup de mou, ce n'est pas grave, mais si ça continue mieux vaut ajuster le plan à quelque chose de plus réaliste.`,
+    en_camino: (pct) => `Tu es en très bonne voie : ${pct}% de réussite ces deux dernières semaines. Continue comme ça.`,
+    estable: (pct) => `Progression stable (${pct}% de réussite). Tout va bien.`,
+  },
+  ca: {
+    sin_datos: () => 'Encara no hi ha prou dades per valorar la teva progressió.',
+    flojeando: (streak) => `Portes ${streak} dies seguits sense completar entrenaments. És un bon moment per preguntar-te per què (falta de temps, motivació, alguna molèstia?) — si necessites replanificar objectius, digues-m'ho i ho ajustem junts.`,
+    atencion: (pct) => `Vas una mica fluix aquesta quinzena (${pct}% de compliment). No passa res per un bache, però si continua així convé ajustar el pla a alguna cosa més realista.`,
+    en_camino: (pct) => `Vas molt ben encaminat: ${pct}% de compliment en les últimes dues setmanes. Segueix així.`,
+    estable: (pct) => `Progressió estable (${pct}% de compliment). Tot en ordre.`,
+  },
+  oc: {
+    sin_datos: () => 'Encara non i a pro donadas entà valorar era tua progression.',
+    flojeando: (streak) => `Pòrtes ${streak} dies de seguit sense acabar entrainaments. Ei bon moment entà demandar-te per qué (manca de temps, de motivacion, bèra molèstia?) — se cau tornar planificar objectius, ditz-m'ac e ac ajustam amassa.`,
+    atencion: (pct) => `Vas un shinhau fluish aguesta quinzena (${pct}% de compliment). Non i a arren de mau per un bache, mès se contunha atau cau ajustar eth plan a quauquarren mès realista.`,
+    en_camino: (pct) => `Vas fòrça ben encaminat: ${pct}% de compliment enes darrères dues setmanas. Contunha atau.`,
+    estable: (pct) => `Progression establa (${pct}% de compliment). Tot en òrdre.`,
+  },
+};
+function adherenceMsg(lang, key, ...args) {
+  const dict = ADHERENCE_MSG[lang] || ADHERENCE_MSG.es;
+  return (dict[key] || ADHERENCE_MSG.es[key])(...args);
+}
 
 // Enlaza sesiones planificadas con actividades reales de Strava que ya estaban importadas pero
 // que nunca llegaron a emparejarse (matchSession en strava.js solo mira las actividades nuevas de
@@ -31,10 +77,11 @@ export function backfillSessionMatches(userId) {
 }
 
 export function adherenceStatus(userId, date = today()) {
+  const lang = (getSettings(userId) || {}).language || 'es';
   const from = addDays(date, -WINDOW);
   const rows = db.prepare(`SELECT date, type, status, origin, duration_min, load FROM sessions
       WHERE user_id = ? AND date >= ? AND date < ? AND type != 'rest' ORDER BY date`).all(userId, from, date);
-  if (!rows.length) return { level: 'sin_datos', message: 'Aún no hay suficientes datos para valorar tu progresión.', streak: 0 };
+  if (!rows.length) return { level: 'sin_datos', message: adherenceMsg(lang, 'sin_datos'), streak: 0 };
 
   const past = rows.filter(r => r.date < date); // solo lo que ya debería haber pasado
   const evaluable = past.filter(r => r.status !== 'planned');
@@ -57,19 +104,20 @@ export function adherenceStatus(userId, date = today()) {
   // Cuántos ajustes a la baja (origin ia/ajuste que redujeron algo) en la ventana
   const reduced = db.prepare(`SELECT COUNT(*) c FROM sessions WHERE user_id = ? AND date >= ? AND date < ? AND origin IN ('ajuste','ia') AND change_note IS NOT NULL`).get(userId, from, date).c;
 
+  const pct = Math.round(compliance * 100);
   let level, message;
   if (streak >= 5) {
     level = 'flojeando';
-    message = `Llevas ${streak} días seguidos sin completar entrenos. Es buen momento para preguntarte por qué (¿falta de tiempo, motivación, alguna molestia?) — si necesitas replanificar objetivos, dímelo y lo adaptamos juntos.`;
+    message = adherenceMsg(lang, 'flojeando', streak);
   } else if (streak >= 3 || compliance < 0.6) {
     level = 'atencion';
-    message = `Vas un poco flojo esta quincena (${Math.round(compliance * 100)}% de cumplimiento). No pasa nada por un bache, pero si sigue así conviene ajustar el plan a algo más realista.`;
+    message = adherenceMsg(lang, 'atencion', pct);
   } else if (compliance >= 0.85 && reduced <= 2) {
     level = 'en_camino';
-    message = `Vas muy bien encaminado: ${Math.round(compliance * 100)}% de cumplimiento en las últimas dos semanas. Sigue así.`;
+    message = adherenceMsg(lang, 'en_camino', pct);
   } else {
     level = 'estable';
-    message = `Progresión estable (${Math.round(compliance * 100)}% de cumplimiento). Todo en orden.`;
+    message = adherenceMsg(lang, 'estable', pct);
   }
   return { level, message, streak, compliance: +compliance.toFixed(2), reduced_sessions: reduced };
 }
