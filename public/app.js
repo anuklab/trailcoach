@@ -381,7 +381,7 @@ async function renderHoy() {
 function sessionCard(s) {
   const badge = s.status === 'done' ? `<span class="pill done">${t('btn_done')}</span>` : s.status === 'partial' ? `<span class="pill partial">${t('btn_partial')}</span>`
     : s.status === 'missed' ? `<span class="pill missed">${t('btn_notdone')}</span>` : '';
-  const key = s.key ? '<span class="pill key">Clave</span>' : '';
+  const key = s.key ? `<span class="pill key">${t('pill_key')}</span>` : '';
   const zones = zoneBar(s.zone);
   const changeNote = s.change_note ? `<p class="small" style="color:var(--accent2)">${icon('edit')} ${esc(s.change_note)}</p>` : '';
   return `<div class="session ${s.type === 'rest' ? 'rest' : ''}" data-id="${s.id}">
