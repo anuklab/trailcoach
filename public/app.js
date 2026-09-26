@@ -963,12 +963,11 @@ async function loadNutritionInline() {
         <div><label>${t('nutr_date_label')}</label><input id="n-date" type="date" value="${todayStr()}"></div>
         <div><label>${t('nutr_minute_label')}</label><input id="n-min" type="number" placeholder="${t('nutr_minute_ph')}"></div>
       </div>
-      <label>${t('nutr_product_label')}</label><input id="n-product" placeholder="${t('nutr_product_ph')}">
-      ${(K.gel_presets && K.gel_presets.length) ? `
-      <label class="small muted">${t('nutr_presets_hint')}</label>
-      <div class="chip-row" id="n-preset">
-        ${K.gel_presets.map((g, i) => `<div class="chip" data-i="${i}">${esc(g.brand)} ${esc(g.product)}</div>`).join('')}
-      </div>` : ''}
+      <label>${t('nutr_product_label')}</label>
+      <div class="autocomplete-wrap" style="position:relative">
+        <input id="n-product" placeholder="${t('nutr_product_ph')}" autocomplete="off">
+        <div id="n-product-suggest" class="autocomplete-list" style="display:none"></div>
+      </div>
       <div class="row">
         <div><label>${t('nutr_carbs_label')}</label><input id="n-carbs" type="number"></div>
         <div><label>${t('nutr_sodium_label')}</label><input id="n-sodium" type="number"></div>
@@ -1014,6 +1013,7 @@ async function loadNutritionInline() {
       <p class="source-note">${t('nutr_sources_note')}</p>
     </div>
   `;
+  wireProductAutocomplete('n-product', 'n-product-suggest', { carbs_g: 'n-carbs', sodium_mg: 'n-sodium', caffeine_mg: 'n-caf' });
 }
 let NUTRITION_TEXT = { carbs: '', sodium: '', gut: '' };
 let K = { method: null, zones: [], gel_presets: [] }; // caché de /knowledge para toda la app
@@ -1064,14 +1064,40 @@ async function saveNutritionLog() {
   toast(t('toast_nutrition_logged')); loadNutritionInline();
 }
 document.addEventListener('click', e => { const c = e.target.closest?.('#n-feeling .chip'); if (c) { $$('#n-feeling .chip').forEach(x => x.classList.remove('selected')); c.classList.add('selected'); } });
-document.addEventListener('click', e => {
-  const c = e.target.closest?.('#n-preset .chip');
-  if (!c) return;
-  $$('#n-preset .chip').forEach(x => x.classList.remove('selected')); c.classList.add('selected');
-  const g = K.gel_presets[+c.dataset.i]; if (!g) return;
-  $('#n-product').value = `${g.brand} ${g.product}`;
-  $('#n-carbs').value = g.carbs_g ?? ''; $('#n-sodium').value = g.sodium_mg ?? ''; $('#n-caf').value = g.caffeine_mg ?? '';
-});
+// Autocompletado de producto de nutrición: al escribir (ej. "maur") filtra K.gel_presets por
+// marca o producto y muestra una lista clicable debajo del input, en vez de una fila fija con
+// todos los presets siempre visibles. `fieldMap` asocia cada campo del preset (carbs_g, sodium_mg,
+// caffeine_mg) con el id del input que hay que rellenar al elegir uno.
+function wireProductAutocomplete(inputId, listId, fieldMap) {
+  const input = document.getElementById(inputId);
+  const list = document.getElementById(listId);
+  if (!input || !list) return;
+  const presets = K.gel_presets || [];
+  const norm = s => (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const render = () => {
+    const q = norm(input.value.trim());
+    if (!q || !presets.length) { list.style.display = 'none'; list.innerHTML = ''; return; }
+    const matches = presets.filter(g => norm(g.brand).includes(q) || norm(g.product).includes(q)).slice(0, 8);
+    if (!matches.length) { list.style.display = 'none'; list.innerHTML = ''; return; }
+    list.innerHTML = matches.map((g, i) => `<div class="autocomplete-item" data-i="${presets.indexOf(g)}"><strong>${esc(g.brand)}</strong> ${esc(g.product)}</div>`).join('');
+    list.style.display = 'block';
+  };
+  input.addEventListener('input', render);
+  input.addEventListener('focus', render);
+  list.addEventListener('click', e => {
+    const item = e.target.closest('.autocomplete-item');
+    if (!item) return;
+    const g = presets[+item.dataset.i];
+    if (!g) return;
+    input.value = `${g.brand} ${g.product}`;
+    Object.entries(fieldMap).forEach(([presetKey, fieldId]) => {
+      const el = document.getElementById(fieldId);
+      if (el) el.value = g[presetKey] ?? '';
+    });
+    list.style.display = 'none'; list.innerHTML = '';
+  });
+  document.addEventListener('click', e => { if (e.target !== input && !list.contains(e.target)) { list.style.display = 'none'; } });
+}
 async function delNutritionLog(id) { await del(`/nutrition/${id}`); loadNutritionInline(); }
 
 // =================== HISTORIAL ===================
@@ -1160,11 +1186,11 @@ function postSyncNutritionPrompt(items) {
       <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
       <h2>${t('nutr_post_sync_title')} "${esc(a.name)}"?</h2>
       <p class="muted small">${fmtDate(a.date)} · ${hm(Math.round((a.moving_time_s || 0) / 60))}</p>
-      ${(K.gel_presets && K.gel_presets.length) ? `
-      <div class="chip-row" id="psn-preset">
-        ${K.gel_presets.map((g, gi) => `<div class="chip" data-i="${gi}">${esc(g.brand)} ${esc(g.product)}</div>`).join('')}
-      </div>` : ''}
-      <label>${t('nutr_product_label')}</label><input id="psn-product" placeholder="${t('nutr_product_ph')}">
+      <label>${t('nutr_product_label')}</label>
+      <div class="autocomplete-wrap" style="position:relative">
+        <input id="psn-product" placeholder="${t('nutr_product_ph')}" autocomplete="off">
+        <div id="psn-product-suggest" class="autocomplete-list" style="display:none"></div>
+      </div>
       <div class="row">
         <div><label>${t('nutr_carbs_label')}</label><input id="psn-carbs" type="number"></div>
         <div><label>${t('nutr_sodium_label')}</label><input id="psn-sodium" type="number"></div>
@@ -1176,10 +1202,7 @@ function postSyncNutritionPrompt(items) {
         <button class="primary" onclick="_postSyncSave()">${t('btn_save')}</button>
       </div>
     `, { center: true });
-    $$('#psn-preset .chip').forEach(c => c.addEventListener('click', () => {
-      const g = K.gel_presets[+c.dataset.i];
-      $('#psn-product').value = `${g.brand} ${g.product}`; $('#psn-carbs').value = g.carbs_g ?? ''; $('#psn-sodium').value = g.sodium_mg ?? '';
-    }));
+    wireProductAutocomplete('psn-product', 'psn-product-suggest', { carbs_g: 'psn-carbs', sodium_mg: 'psn-sodium' });
   };
   window._postSyncSkip = () => { i++; askNext(); };
   window._postSyncSave = async () => {

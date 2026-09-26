@@ -130,6 +130,11 @@ label { display: block; font-size: .82rem; color: var(--muted); margin: .6em 0 .
 .chip-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 .chip { flex: 0 0 auto; padding: .5em .9em; border-radius: 999px; background: var(--panel2); border: 1px solid var(--border); cursor: pointer; font-size: .85rem; }
 .chip.selected { background: var(--accent); color: #0e1512; border-color: var(--accent); font-weight: 700; }
+.autocomplete-list { position: absolute; top: 100%; left: 0; right: 0; z-index: 15; background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; margin-top: 4px; max-height: 220px; overflow-y: auto; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+.autocomplete-item { padding: 8px 12px; cursor: pointer; font-size: .88rem; border-bottom: 1px solid var(--border); }
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item:hover, .autocomplete-item:active { background: var(--accent); color: #0e1512; }
+.autocomplete-item strong { font-weight: 700; }
 .toast { position: fixed; bottom: 90px; left: 14px; right: 14px; max-width: 612px; margin: 0 auto; background: var(--panel2); border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; z-index: 20; animation: up .2s ease; }
 .update-banner { position: fixed; bottom: 0; left: 0; right: 0; z-index: 25; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: var(--panel2); border-top: 1px solid var(--accent); animation: up .2s ease; }
 .update-banner-inner { max-width: 612px; margin: 0 auto; }
