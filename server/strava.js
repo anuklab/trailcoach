@@ -3,6 +3,7 @@
 import { db, log } from './db.js';
 import { activityLoad } from './load.js';
 import { addDays, today } from './util.js';
+import { autoAdaptAfterSync } from './adjust.js';
 
 const CLIENT_ID = process.env.STRAVA_CLIENT_ID;
 const CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
@@ -85,10 +86,15 @@ function upsertActivity(userId, a) {
 }
 
 // Empareja la actividad real con la sesión planificada del mismo día (si existe y no tiene ya una), del mismo usuario.
+// Si se movió muy poco tiempo respecto a lo planeado, la marca como "partial" en vez de "done" —
+// así una sesión empezada y cortada pronto no cuenta como cumplida del todo.
 function matchSession(userId, row) {
-  const s = db.prepare(`SELECT id FROM sessions WHERE user_id = ? AND date = ? AND activity_id IS NULL AND type NOT IN ('rest','strength') ORDER BY id LIMIT 1`).get(userId, row.date);
-  if (!s) return;
-  db.prepare(`UPDATE sessions SET activity_id=?, status='done' WHERE id=? AND user_id=?`).run(row.id, s.id, userId);
+  const s = db.prepare(`SELECT * FROM sessions WHERE user_id = ? AND date = ? AND activity_id IS NULL AND type NOT IN ('rest','strength') ORDER BY id LIMIT 1`).get(userId, row.date);
+  if (!s) return null;
+  const actualMin = (row.moving_time_s || 0) / 60;
+  const status = (s.duration_min > 0 && actualMin < s.duration_min * 0.5) ? 'partial' : 'done';
+  db.prepare(`UPDATE sessions SET activity_id=?, status=? WHERE id=? AND user_id=?`).run(row.id, status, s.id, userId);
+  return { ...s, status, activity_id: row.id };
 }
 
 export async function syncStrava(userId, { full = false } = {}) {
@@ -98,6 +104,7 @@ export async function syncStrava(userId, { full = false } = {}) {
   const after = full ? Math.floor(new Date('2015-01-01').getTime() / 1000) : Math.floor(new Date(last || addDays(today(), -400)).getTime() / 1000);
   let page = 1, total = 0;
   const newRows = [];
+  const matched = [];
   for (;;) {
     const resp = await fetch(`https://www.strava.com/api/v3/athlete/activities?after=${after}&per_page=100&page=${page}`,
       { headers: { authorization: `Bearer ${token}` } });
@@ -105,7 +112,10 @@ export async function syncStrava(userId, { full = false } = {}) {
     const acts = await resp.json();
     if (!acts.length) break;
     for (const a of acts) {
-      const row = upsertActivity(userId, a); matchSession(userId, row); total++;
+      const row = upsertActivity(userId, a);
+      const m = matchSession(userId, row);
+      if (m) matched.push({ session: m, activity: row });
+      total++;
       if (row.isNew) newRows.push(row);
     }
     page++;
@@ -113,6 +123,17 @@ export async function syncStrava(userId, { full = false } = {}) {
   }
   db.prepare('UPDATE users SET strava_last_sync=? WHERE id=?').run(new Date().toISOString(), userId);
   log(userId, 'strava', `Sincronizadas ${total} actividades`);
+
+  // Adapta el plan próximo a la carga REAL (no autoinformada) cuando detecta fatiga alta o un
+  // entreno bastante más duro de lo previsto — el mismo mecanismo que el check-in manual, pero
+  // disparado por Strava. Solo en sincronizaciones normales: un "full" resync trae histórico
+  // antiguo y no debe tocar el plan de los próximos días.
+  let planChanges = [];
+  if (!full && matched.length) {
+    try { planChanges = autoAdaptAfterSync(userId, matched, today()); }
+    catch (e) { log(userId, 'auto-adapt-error', e.message); }
+  }
+
   // Actividades nuevas de duración relevante (>15 min) sin registro nutricional todavía, para preguntar qué se tomó.
   const unlogged = newRows
     .filter(r => (r.moving_time_s || 0) > 900)
@@ -120,5 +141,5 @@ export async function syncStrava(userId, { full = false } = {}) {
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5)
     .map(r => ({ activity_id: r.id, name: r.name, date: r.date, sport_type: r.sport_type, moving_time_s: r.moving_time_s }));
-  return { imported: total, unlogged_nutrition: unlogged };
+  return { imported: total, unlogged_nutrition: unlogged, plan_changes: planChanges };
 }

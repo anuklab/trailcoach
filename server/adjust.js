@@ -2,7 +2,7 @@
 // si se piden más cambios en lenguaje natural, delega en la IA (claude.js).
 import { db, tx, log, getSettings } from './db.js';
 import { addDays, today, DIAS, weekday } from './util.js';
-import { sessionLoad } from './load.js';
+import { sessionLoad, currentFitness } from './load.js';
 import { describe } from './workouts.js';
 import { generatePlan } from './planner.js';
 import { askClaudeForAdjustment } from './claude.js';
@@ -163,4 +163,51 @@ export async function naturalAdjust(userId, message, { date = today(), days = 14
   });
   log(userId, 'ia-adjust', message, { applied, explanation: result.explanation });
   return { message: result.explanation || 'Ajustado.', applied };
+}
+
+const QUALITY_TYPES = ['vert', 'tempo', 'intervals', 'long', 'b2b', 'loop'];
+
+/**
+ * Tras sincronizar Strava, adapta el plan a la carga REAL (no autoinformada como en el check-in):
+ * si la frescura (TSB) del atleta está muy baja, o una actividad recién importada ha salido bastante
+ * más dura de lo planeado, suaviza automáticamente la próxima sesión de calidad de los próximos días
+ * — mismo mecanismo de siempre (`scale`), pero disparado por los datos de Strava en vez de por lo
+ * que cuente el atleta en el check-in. A propósito conservador: solo toca UNA sesión por sincronización,
+ * nunca una ya bloqueada o ya tocada a mano/por IA (origin != 'plan').
+ *
+ * `matched` son las { session, activity } que se acaban de emparejar en esta sincronización.
+ */
+export function autoAdaptAfterSync(userId, matched, date = today()) {
+  const changes = [];
+  if (!matched.length) return changes;
+
+  const fit = currentFitness(userId, date);
+  const overshoot = matched
+    .filter(({ session, activity }) => session.load > 0 && (activity.load || 0) > session.load * 1.4)
+    .sort((a, b) => (b.activity.load / b.session.load) - (a.activity.load / a.session.load))[0];
+
+  let reason = null, factor = null;
+  if (fit.tsb <= -20) {
+    reason = `fatiga alta según tu carga real de Strava (frescura ${fit.tsb})`;
+    factor = 0.7;
+  } else if (overshoot && overshoot.activity.load > overshoot.session.load * 1.8) {
+    reason = `"${overshoot.session.title}" salió bastante más dura de lo planeado según Strava`;
+    factor = 0.75;
+  } else if (fit.tsb <= -10 && overshoot) {
+    reason = `"${overshoot.session.title}" salió más dura de lo previsto y ya vas con la frescura baja (${fit.tsb})`;
+    factor = 0.85;
+  }
+  if (!reason) return changes;
+
+  const next = db.prepare(`SELECT * FROM sessions WHERE user_id = ? AND date > ? AND date <= ?
+      AND type IN (${QUALITY_TYPES.map(() => '?').join(',')}) AND status = 'planned' AND origin = 'plan' AND locked = 0
+      ORDER BY date LIMIT 1`).get(userId, date, addDays(date, 2), ...QUALITY_TYPES);
+  if (!next) return changes;
+
+  tx(() => {
+    const r = scale(userId, next, factor, { origin: 'auto', note: `Ajustada automáticamente: ${reason}.` });
+    if (r) changes.push(`${r.date}: ${next.title} → ${r.title} (${reason}).`);
+  });
+  log(userId, 'auto-adapt', reason, { tsb: fit.tsb, changes });
+  return changes;
 }
