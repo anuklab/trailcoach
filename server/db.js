@@ -257,6 +257,7 @@ export const DEFAULT_SETTINGS = {
   weight_kg: 70,
   injury_history: '', // texto libre: lesiones pasadas/crónicas — el planificador se vuelve más conservador si hay algo aquí
   onboarding_done: false, // controla si se ha completado el asistente inicial (datos + objetivo)
+  language: 'es', // idioma de la interfaz: es, en, fr, ca, oc (aranés)
 };
 
 // Los ajustes viven por usuario, en users.settings (JSON), fusionados con los valores por defecto.

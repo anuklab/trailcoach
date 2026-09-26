@@ -14,8 +14,13 @@ const LOADING_PHASES = ['base', 'build', 'specific', 'peak'];
 // ---------- Estimaciones a partir del historial ----------
 
 // "Km-esfuerzo": km + D+/100. Estimamos el tiempo de carrera con una ley de potencia (tipo Riegel).
+// En una carrera por etapas, distance_km/dplus_m guardan la etapa MEDIA (como dplus_m en un
+// Backyard guarda el de una sola vuelta), así que hay que multiplicar por el nº de etapas para
+// estimar el esfuerzo TOTAL de la carrera (que es con lo que se compara target_time_h, un objetivo
+// de tiempo total, no por etapa).
 export function estimateRaceHours(userId, race) {
-  const ekm = (race.distance_km || 0) + (race.dplus_m || 0) / 100;
+  const nStages = race.type === 'stage' ? (race.n_stages || 1) : 1;
+  const ekm = ((race.distance_km || 0) + (race.dplus_m || 0) / 100) * nStages;
   if (!ekm) return null;
   const past = db.prepare('SELECT distance_km, dplus_m, time_min FROM past_races WHERE user_id = ? AND time_min > 0 AND distance_km > 0').all(userId)
     .map(p => ({ ekm: p.distance_km + (p.dplus_m || 0) / 100, h: p.time_min / 60 }))
@@ -90,12 +95,8 @@ function racesForUser(userId) {
       return { ...r, est_h: r.target_time_h || 24 };
     }
     if (r.type === 'stage') {
-      // En una carrera por etapas distance_km/dplus_m guardan la etapa MEDIA (igual que dplus_m en
-      // backyard es el de una sola vuelta); para estimar el tiempo total usamos el esfuerzo
-      // acumulado de todas las etapas juntas.
-      const n = r.n_stages || 1;
-      const est = estimateRaceHours(userId, { ...r, distance_km: (r.distance_km || 0) * n, dplus_m: (r.dplus_m || 0) * n });
-      return { ...r, est_h: r.target_time_h || est };
+      // estimateRaceHours ya multiplica por n_stages para tener el esfuerzo TOTAL de la carrera.
+      return { ...r, est_h: r.target_time_h || estimateRaceHours(userId, r) };
     }
     return { ...r, est_h: estimateRaceHours(userId, r) };
   });

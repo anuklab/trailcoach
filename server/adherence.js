@@ -5,6 +5,31 @@ import { addDays, today } from './util.js';
 
 const WINDOW = 14; // días que miramos hacia atrás
 
+// Enlaza sesiones planificadas con actividades reales de Strava que ya estaban importadas pero
+// que nunca llegaron a emparejarse (matchSession en strava.js solo mira las actividades nuevas de
+// CADA sincronización — si una actividad se importó ANTES de que existiera la sesión planificada
+// de ese día, ej. un resync histórico hecho antes de generar el plan, se queda huérfana para
+// siempre). Sin esto, el % de "entrenos completados" sale mal: el atleta sí entrenó (se ve en
+// km/D+/horas, que vienen directo de `activities`) pero la sesión sigue en estado "planned".
+// Se llama de forma barata y repetible (idempotente) cada vez que se genera/regenera el plan y
+// cada vez que se pide el resumen de "Hoy", así se autocorrige sin necesitar un resync manual.
+export function backfillSessionMatches(userId) {
+  const pending = db.prepare(`SELECT * FROM sessions WHERE user_id = ? AND activity_id IS NULL AND status = 'planned'
+      AND type NOT IN ('rest','strength') AND date < ? ORDER BY date`).all(userId, today());
+  let n = 0;
+  for (const s of pending) {
+    const act = db.prepare(`SELECT * FROM activities WHERE user_id = ? AND date = ?
+        AND id NOT IN (SELECT activity_id FROM sessions WHERE user_id = ? AND activity_id IS NOT NULL)
+        ORDER BY moving_time_s DESC LIMIT 1`).get(userId, s.date, userId);
+    if (!act) continue;
+    const actualMin = (act.moving_time_s || 0) / 60;
+    const status = (s.duration_min > 0 && actualMin < s.duration_min * 0.5) ? 'partial' : 'done';
+    db.prepare(`UPDATE sessions SET activity_id = ?, status = ? WHERE id = ? AND user_id = ?`).run(act.id, status, s.id, userId);
+    n++;
+  }
+  return n;
+}
+
 export function adherenceStatus(userId, date = today()) {
   const from = addDays(date, -WINDOW);
   const rows = db.prepare(`SELECT date, type, status, origin, duration_min, load FROM sessions

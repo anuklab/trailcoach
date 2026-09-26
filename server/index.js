@@ -11,7 +11,7 @@ import { generatePlan, weeksOverview, estimateRaceHours, racesFor, targetFeasibi
 import { applyCheckin, editSession, recalcFrom, naturalAdjust, applyRpeFeedback } from './adjust.js';
 import { fitnessSeries, currentFitness } from './load.js';
 import { authUrl, exchangeCode, syncStrava, stravaStatus, stravaConfigured, disconnectStrava } from './strava.js';
-import { adherenceStatus, monthSummary } from './adherence.js';
+import { adherenceStatus, monthSummary, backfillSessionMatches } from './adherence.js';
 import { buildPacingPlan } from './pacing.js';
 import * as Nutrition from './nutrition.js';
 import { NUTRITION_GUIDE, STRENGTH_GUIDE, STRENGTH_LIBRARY, nutritionTargetsFor, METHOD_GUIDE, hrZones, GEL_PRESETS } from './knowledge.js';
@@ -189,6 +189,7 @@ app.post('/api/billing/cancel', wrap(async (req, res) => {
 app.get('/api/today', wrap((req, res) => {
   const uid = req.userId;
   const d = req.query.date || today();
+  backfillSessionMatches(uid);
   const sessions = db.prepare('SELECT * FROM sessions WHERE user_id = ? AND date = ? ORDER BY id').all(uid, d);
   const checkin = db.prepare('SELECT * FROM checkins WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1').get(uid, d);
   const fit = currentFitness(uid, d);
@@ -206,6 +207,7 @@ app.get('/api/plan', wrap((req, res) => {
   const uid = req.userId;
   const from = req.query.from || mondayOf(today());
   const to = req.query.to || addDays(from, 84);
+  backfillSessionMatches(uid);
   const sessions = db.prepare('SELECT * FROM sessions WHERE user_id = ? AND date BETWEEN ? AND ? ORDER BY date, id').all(uid, from, to);
   res.json({ from, to, sessions, weeks: weeksOverview(uid, from, to) });
 }));
