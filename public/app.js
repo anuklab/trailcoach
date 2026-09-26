@@ -1219,6 +1219,11 @@ async function renderAjustes() {
       <div><label>FC en reposo</label><input id="s-hrrest" type="number" inputmode="numeric" pattern="[0-9]*" value="${s.hr_rest}"></div></div>
       <label>Peso (kg)</label><input id="s-weight" type="number" inputmode="decimal" pattern="[0-9]*" value="${s.weight_kg || 70}">
     </div>
+    <div class="card">
+      <h2>Historial de lesiones</h2>
+      <p class="muted small">Lesiones pasadas o crónicas que debamos tener en cuenta (rodilla, tendón de Aquiles, fascitis...). Con algo aquí, el plan sube la carga más despacio, hace descargas más frecuentes y retrasa las sesiones de bajada (las que más castigan la rodilla).</p>
+      <textarea id="s-injuries" rows="3" placeholder="Ej: tendinopatía rotuliana en 2024, recuperada pero recae si subo desnivel de golpe.">${esc(s.injury_history || '')}</textarea>
+    </div>
     <button class="primary" style="width:100%" onclick="saveSettings()">Guardar ajustes</button>
     <div class="card" style="margin-top:20px">
       <h2>Cuenta</h2>
@@ -1360,6 +1365,7 @@ async function saveSettings() {
     athlete_name: $('#s-name').value, availability, availability_windows, max_week_hours: +$('#s-maxh').value, long_day: +$('#s-longday').value, b2b_day: +$('#s-b2bday').value,
     strength: $('#s-strength').checked, strength_mode: modeChip ? modeChip.dataset.v : 'gym', poles: $('#s-poles').checked,
     hr_max: +$('#s-hrmax').value, hr_rest: +$('#s-hrrest').value, weight_kg: +$('#s-weight').value || 70,
+    injury_history: $('#s-injuries').value.trim(),
   });
   toast('Ajustes guardados');
   if (confirm('¿Regenerar el plan con los nuevos ajustes?')) await regenPlan();
