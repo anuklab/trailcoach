@@ -126,14 +126,18 @@ export function generatePlan(userId, { from = null, reason = 'Plan generado' } =
     : 200;
     const peakLong = race ? Math.min(st.availability[st.long_day] || 240, clamp((race.est_h || 10) * 0.2 * 60, 120, 390)) : 180;
 
+    // La progresión (cuánto sube el volumen cada semana, cada cuántas semanas toca descarga) no es
+    // igual para todos los atletas aunque preparen la misma carrera — depende de su nivel, edad e
+    // historial de lesiones (ver progressionProfile en methodology.js).
+    const prog = methodology.progression;
     let weekMin, phase = ph.phase, densF = 0.6, deload = false;
     if (LOADING_PHASES.includes(phase)) {
       streak++;
-      if (streak % 4 === 0) { deload = true; weekMin = buildMin * 0.7; }
+      if (streak % prog.deloadEvery === 0) { deload = true; weekMin = buildMin * 0.7; }
       else {
-        buildMin = Math.min(peakMin, buildMin * 1.1 + 15);
+        buildMin = Math.min(peakMin, buildMin * prog.buildMult + prog.buildAdd);
         weekMin = buildMin;
-        longMin = Math.min(peakLong, longMin + (phase === 'base' ? 15 : 25));
+        longMin = Math.min(peakLong, longMin + (phase === 'base' ? prog.longIncBase : prog.longIncOther));
       }
       densF = { base: 0.55, build: 0.85, specific: 1.05, peak: 1.15 }[phase] * (deload ? 0.75 : 1);
     } else {
@@ -213,7 +217,11 @@ function buildWeek(w) {
   if (!restDays.size) restDays.add((L + (useB2B ? 2 : 1)) % 7);
 
   const baseNQuality = { base: 1, build: 2, specific: 2, peak: 2, taper: 1, recovery: 0 }[phase] ?? 1;
-  const nQuality = methodology.overloaded ? Math.max(0, baseNQuality - 1) : (deload ? Math.max(0, baseNQuality - 1) : baseNQuality);
+  const nQualityRaw = methodology.overloaded ? Math.max(0, baseNQuality - 1) : (deload ? Math.max(0, baseNQuality - 1) : baseNQuality);
+  // Tope por perfil de progresión: un atleta con lesiones registradas, principiante o mayor no
+  // recibe más sesiones de calidad por semana de las que su progresión conservadora permite,
+  // aunque la fase "tocase" meter más (ver progressionProfile en methodology.js).
+  const nQuality = Math.min(nQualityRaw, methodology.progression.maxQuality);
   const baseNStrength = !st.strength ? 0 : { base: 2, build: 2, specific: 1, peak: 1, taper: phase === 'taper' && w.weekMin < 0.7 * 600 ? 0 : 1, recovery: 1 }[phase] ?? 1;
   const nStrength = deload ? Math.max(st.strength ? 1 : 0, baseNStrength - 1) : baseNStrength;
 
@@ -254,9 +262,14 @@ function buildWeek(w) {
   // bajada (o estamos ya en específico/peak, priorizando especificidad de montaña) sesgamos hacia
   // más sesiones de bajada/excéntrico, que es lo que más protege la rodilla en carrera.
   const weekIdx = Math.floor(diffDays('2020-01-06', ws) / 7);
-  const vertVariant = methodology.downhillEmphasis
-    ? (weekIdx % 3 === 0 ? 'subida' : 'bajada')
-    : (weekIdx % 2 === 0 ? 'subida' : 'bajada');
+  // Con historial de lesiones (o progresión conservadora en general) se retrasa/reduce la
+  // frecuencia de bajada: es la sesión con más carga excéntrica y más riesgo si la rodilla o el
+  // tendón no están preparados todavía.
+  const vertVariant = methodology.progression.downhillCaution
+    ? (weekIdx % 4 === 0 ? 'bajada' : 'subida')
+    : methodology.downhillEmphasis
+      ? (weekIdx % 3 === 0 ? 'subida' : 'bajada')
+      : (weekIdx % 2 === 0 ? 'subida' : 'bajada');
   quality.forEach((i, k) => {
     const t = qTypes[k] || (isBackyard ? 'loop' : 'tempo');
     const d = t === 'loop'

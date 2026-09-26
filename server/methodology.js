@@ -10,7 +10,7 @@
 // disponibilidad reales, y — lo más importante — su fatiga real (Forma/Fatiga/Frescura) en el
 // momento de generar el plan. Así el sistema se comporta como un entrenador que mira los datos,
 // no como un calendario fijo de 12-16 semanas.
-import { db } from './db.js';
+import { db, getSettings } from './db.js';
 import { currentFitness } from './load.js';
 import { addDays, diffDays, mondayOf, today } from './util.js';
 
@@ -41,6 +41,47 @@ export function classifyAthlete(userId) {
   if (yearsHistory >= 3) score += 1;
   const level = score >= 5 ? 'avanzado' : score >= 2 ? 'intermedio' : 'principiante';
   return { level, weeklyMin, longestUltra, nPastRaces, yearsHistory };
+}
+
+function ageFrom(birthDate) {
+  if (!birthDate) return null;
+  const b = new Date(birthDate);
+  if (isNaN(b)) return null;
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const m = now.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+  return age;
+}
+
+// ---------- Perfil de progresión ----------
+// Dos atletas preparando la MISMA carrera no tienen por qué recibir la misma progresión de carga:
+// un principiante, alguien con lesiones previas registradas, o un atleta mayor necesitan subidas
+// de volumen más lentas y descargas más frecuentes que un atleta avanzado y sano. Esto convierte
+// el nivel/edad/historial de lesiones en números concretos que usa planner.js — antes `athlete.level`
+// solo aparecía como texto explicativo y no cambiaba ni un minuto del plan real.
+export function progressionProfile(userId) {
+  const athlete = classifyAthlete(userId);
+  const st = getSettings(userId);
+  const age = ageFrom(st.birth_date);
+  const hasInjuryHistory = !!(st.injury_history && st.injury_history.trim());
+  const masters = age != null && age >= 55;
+  const conservative = hasInjuryHistory || masters || athlete.level === 'principiante';
+  const aggressive = athlete.level === 'avanzado' && !hasInjuryHistory && !masters;
+
+  const profile = conservative
+    ? { deloadEvery: 3, buildMult: 1.06, buildAdd: 10, longIncBase: 10, longIncOther: 18, maxQuality: hasInjuryHistory ? 1 : 2, downhillCaution: true }
+    : aggressive
+      ? { deloadEvery: 5, buildMult: 1.13, buildAdd: 18, longIncBase: 18, longIncOther: 30, maxQuality: Infinity, downhillCaution: false }
+      : { deloadEvery: 4, buildMult: 1.1, buildAdd: 15, longIncBase: 15, longIncOther: 25, maxQuality: Infinity, downhillCaution: false };
+
+  const reasons = [];
+  if (hasInjuryHistory) reasons.push('tienes historial de lesiones registrado: progresión más lenta y descargas cada 3 semanas en vez de 4.');
+  if (masters) reasons.push(`${age} años: asumimos algo más de tiempo de recuperación al subir carga.`);
+  if (!hasInjuryHistory && !masters && athlete.level === 'principiante') reasons.push('nivel principiante (según tu historial): construimos base más despacio antes de meter más calidad.');
+  if (aggressive) reasons.push('nivel avanzado y sin lesiones registradas: puedes asimilar subidas de carga algo más rápidas, con descargas más espaciadas.');
+
+  return { ...profile, age, hasInjuryHistory, conservative, aggressive, athleteLevel: athlete.level, reasons };
 }
 
 // ---------- Fase de la semana (block periodization) ----------
@@ -116,20 +157,22 @@ export function selectMethodology(userId, ws, ph) {
   const b2bPriority = ['specific', 'peak'].includes(phase);
   const raceSimulation = phase === 'peak';
   const downhillEmphasis = vertHeavy || phase === 'specific' || phase === 'peak';
+  const progression = progressionProfile(userId);
 
   return {
     phase, race, athlete, weeksToRace, intensity: im, overloaded,
-    b2bPriority, raceSimulation, downhillEmphasis, vertHeavy,
-    rationale: buildRationale({ phase, im, athlete, weeksToRace, overloaded, race, vertHeavy }),
+    b2bPriority, raceSimulation, downhillEmphasis, vertHeavy, progression,
+    rationale: buildRationale({ phase, im, athlete, weeksToRace, overloaded, race, vertHeavy, progression }),
   };
 }
 
-function buildRationale({ phase, im, athlete, weeksToRace, overloaded, race, vertHeavy }) {
+function buildRationale({ phase, im, athlete, weeksToRace, overloaded, race, vertHeavy, progression }) {
   const bits = [];
   bits.push(`Fase ${PHASE_LABEL[phase]}${weeksToRace != null && race ? ` — ${weeksToRace} semana(s) para ${race.name}` : ''}.`);
   bits.push(`Distribución de intensidad: ${im.model} (${im.why})`);
   bits.push(`Nivel estimado a partir de tu historial: ${athlete.level} (~${Math.round(athlete.weeklyMin / 60)} h/semana de media, ${athlete.longestUltra || 0} km tu ultra más larga).`);
   if (vertHeavy) bits.push('Tu carrera objetivo es muy de montaña (>25 m D+/km de media): se prioriza el desnivel sobre el ritmo llano.');
   if (overloaded) bits.push('Esta semana tu Frescura está muy negativa: se reduce la intensidad aunque el bloque tocase subir carga.');
+  for (const r of progression?.reasons || []) bits.push(r.charAt(0).toUpperCase() + r.slice(1));
   return bits;
 }
