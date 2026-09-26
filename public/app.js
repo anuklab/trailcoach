@@ -596,8 +596,8 @@ const MESES_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'jul
 const CAL_COLOR = {
   easy: 'var(--z1)', recovery: 'var(--z1)', cross: 'var(--z1)',
   long: 'var(--accent)', b2b: 'var(--accent)',
-  vert: 'var(--z4)', tempo: 'var(--z4)', intervals: 'var(--z4)',
-  strength: 'var(--accent2)', race: 'var(--danger)', rest: 'var(--border)',
+  vert: 'var(--warn)', tempo: 'var(--warn)', intervals: 'var(--warn)',
+  strength: 'var(--violet)', race: 'var(--danger)', rest: 'var(--border)',
 };
 const CAL_LEGEND = [
   ['rest', 'Descanso'], ['easy', 'Suave / recuperación'], ['long', 'Tirada larga'],
