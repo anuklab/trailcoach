@@ -145,10 +145,17 @@ ensureColumn('races', 'start_time', 'TEXT');
 // desnivel/distancia fijo por vuelta, hasta quedar el/la última en pie — "Last Man Standing").
 // En una backyard, dplus_m se reutiliza para guardar el D+ de una sola vuelta, no el total.
 ensureColumn('races', 'type', "TEXT DEFAULT 'ultra'");
-// 'stage': carrera por etapas (Marathon des Sables y similares). distance_km/dplus_m se reutilizan
-// como la distancia/desnivel de UNA etapa media (igual que dplus_m en backyard es el de una vuelta);
-// n_stages es el nº de etapas y target_time_h el objetivo de tiempo TOTAL sumando todas las etapas.
+// 'stage': carrera por etapas (Marathon des Sables y similares). n_stages es el nº de etapas reales
+// (sin contar descansos) y target_time_h el objetivo de tiempo TOTAL sumando todas las etapas.
 ensureColumn('races', 'n_stages', 'INTEGER');
+// stages: JSON [{date:'YYYY-MM-DD', km, dplus_m, dminus_m, rest:boolean}, ...] — un elemento por
+// cada día del rango de la carrera (incluye los días de descanso entre etapas). Con esto,
+// distance_km/dplus_m/dminus_m dejan de ser una "etapa media" ficticia y pasan a ser la SUMA real
+// de todas las etapas (ver applyStagesInput en index.js y stagesTotals en stages.js) — cada día
+// trae su propio km/D+/D- reales, o rest=true si ese día no se corre. Una carrera creada ANTES de
+// tener esta columna (stages = NULL) sigue con el modelo antiguo de "etapa media" × n_stages, que
+// el resto del código (estimateRaceHours en planner.js) sigue soportando como respaldo.
+ensureColumn('races', 'stages', 'TEXT');
 for (const t of ['races', 'past_races', 'activities', 'sessions', 'checkins', 'nutrition_logs']) {
   ensureColumn(t, 'user_id', 'INTEGER');
 }

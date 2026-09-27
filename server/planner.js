@@ -7,6 +7,7 @@ import { sessionLoad } from './load.js';
 import { addDays, diffDays, mondayOf, weekday, today, clamp, round5, toDate } from './util.js';
 import { describe } from './workouts.js';
 import { phaseForWeek, selectMethodology } from './methodology.js';
+import { parseStages, estimateStageHours } from './stages.js';
 
 const RUN_TYPES = `('Run','TrailRun','Hike','Walk','VirtualRun')`;
 const LOADING_PHASES = ['base', 'build', 'specific', 'peak'];
@@ -14,12 +15,15 @@ const LOADING_PHASES = ['base', 'build', 'specific', 'peak'];
 // ---------- Estimaciones a partir del historial ----------
 
 // "Km-esfuerzo": km + D+/100. Estimamos el tiempo de carrera con una ley de potencia (tipo Riegel).
-// En una carrera por etapas, distance_km/dplus_m guardan la etapa MEDIA (como dplus_m en un
-// Backyard guarda el de una sola vuelta), así que hay que multiplicar por el nº de etapas para
-// estimar el esfuerzo TOTAL de la carrera (que es con lo que se compara target_time_h, un objetivo
-// de tiempo total, no por etapa).
+// Una carrera por etapas con su array `stages` ya guarda TOTALES reales (suma de km/D+ de todas
+// las etapas, ver stagesTotals en stages.js), así que ekm sale directo sin más. Solo una carrera
+// por etapas "antigua" (creada antes de tener este array, sin stages) sigue guardando la etapa
+// MEDIA en distance_km/dplus_m — para esas, y solo esas, hay que multiplicar por el nº de etapas
+// para llegar al esfuerzo TOTAL (que es con lo que se compara target_time_h, un objetivo de tiempo
+// total, no por etapa).
 export function estimateRaceHours(userId, race) {
-  const nStages = race.type === 'stage' ? (race.n_stages || 1) : 1;
+  const isLegacyStageAvg = race.type === 'stage' && !race.stages;
+  const nStages = isLegacyStageAvg ? (race.n_stages || 1) : 1;
   const ekm = ((race.distance_km || 0) + (race.dplus_m || 0) / 100) * nStages;
   if (!ekm) return null;
   const past = db.prepare('SELECT distance_km, dplus_m, time_min FROM past_races WHERE user_id = ? AND time_min > 0 AND distance_km > 0').all(userId)
@@ -95,7 +99,7 @@ function racesForUser(userId) {
       return { ...r, est_h: r.target_time_h || 24 };
     }
     if (r.type === 'stage') {
-      // estimateRaceHours ya multiplica por n_stages para tener el esfuerzo TOTAL de la carrera.
+      // estimateRaceHours ya devuelve el esfuerzo TOTAL de la carrera (ver su comentario).
       return { ...r, est_h: r.target_time_h || estimateRaceHours(userId, r) };
     }
     return { ...r, est_h: estimateRaceHours(userId, r) };
@@ -207,6 +211,34 @@ function buildWeek(w) {
     // en vez de perder las que caen "fuera" de la semana de inicio.
     if (r.type === 'stage' && (r.n_stages || 1) > 1) {
       const n = r.n_stages;
+      const stages = parseStages(r);
+      if (stages.length) {
+        // Con el array real de etapas (fecha + km/D+/D- propios, y días de descanso explícitos)
+        // ya no hace falta repartir el tiempo total a partes iguales entre etapas: cada una recibe
+        // su propia estimación de horas (proporcional a su km-esfuerzo real) y su propio perfil.
+        const withH = estimateStageHours(stages, r.est_h || n * 5);
+        // El número de etapa (1/5, 2/5...) tiene que ser absoluto para toda la carrera, no
+        // reiniciarse en cada semana natural — una carrera que cruza el límite de semana (p. ej.
+        // empieza en sábado) se genera en dos llamadas a buildWeek distintas, así que este cálculo
+        // NO puede depender de un contador local a esta función.
+        let cum = 0;
+        const stageNumberAt = withH.map(s => s.rest ? null : ++cum);
+        for (let i = 0; i < 7; i++) {
+          const off = diffDays(r.date, days[i]);
+          if (off >= 0 && off < stages.length) {
+            const s = withH[off];
+            if (s.rest) { sessions.push(mk(i, 'rest', 0, { variant: 'etapa_descanso' })); continue; }
+            sessions.push(mk(i, 'race', s.h * 60, {
+              dplus_m: s.dplus_m || 0, dminus_m: s.dminus_m || 0, distance_km: s.km, key: true, zone: 'Z2-Z3',
+              stageDay: stageNumberAt[off], stageOf: n, stageDate: s.date,
+            }));
+          } else if (off === -1) sessions.push(mk(i, 'rest', 0));
+          else if (off < 0) sessions.push(avail[i] ? mk(i, 'easy', Math.min(45, avail[i])) : mk(i, 'rest', 0));
+          else sessions.push(mk(i, 'rest', 0, { variant: off === stages.length ? 'postcarrera' : undefined }));
+        }
+        return finalize(sessions, w);
+      }
+      // Respaldo para carreras creadas antes de tener el array de etapas: reparto a partes iguales.
       const perStageH = (r.est_h || n * 5) / n;
       for (let i = 0; i < 7; i++) {
         const off = diffDays(r.date, days[i]);
@@ -244,11 +276,16 @@ function buildWeek(w) {
   const useB2B = ['build', 'specific', 'peak'].includes(phase) && B !== L && avail[B] >= 60 && !methodology.overloaded;
 
   // Carrera por etapas en específico/peak: en vez de 1 tirada larga + 1 día de b2b, se entrena un
-  // bloque de 2-3 días SEGUIDOS de fatiga acumulada — que es justo lo que exige una carrera por
-  // etapas y lo que ni la tirada larga ni un back-to-back con un día de por medio simulan bien.
+  // bloque de días SEGUIDOS de fatiga acumulada — que es justo lo que exige una carrera por etapas
+  // y lo que ni la tirada larga ni un back-to-back con un día de por medio simulan bien. Antes el
+  // tope estaba fijo en 3 días pasase lo que pasase (una carrera de 2 etapas y una de 6 recibían el
+  // mismo bloque); ahora escala con el nº real de etapas, con un tope algo mayor para un atleta
+  // avanzado y sin lesiones (más margen para asimilar 4 días seguidos de carga) que para uno
+  // conservador (principiante, con lesiones registradas o mayor), que se queda en como mucho 3.
   // Se decide ANTES de elegir días de calidad/fuerza para que esos días respeten el bloque entero.
+  const stageBlockMax = methodology.progression.aggressive ? 4 : 3;
   const stageBlockDays = methodology.isStage && ['specific', 'peak'].includes(phase)
-    ? Math.min(3, Math.max(2, w.race.n_stages || 2)) : 0;
+    ? Math.min(stageBlockMax, Math.max(2, w.race.n_stages || 2)) : 0;
   let remaining = w.weekMin;
   const plan = {};
   const stageDaysUsed = [];
@@ -311,21 +348,36 @@ function buildWeek(w) {
   // En Backyard Ultra la calidad no es umbral/VO2max: es aguantar el mismo esfuerzo moderado,
   // vuelta tras vuelta, cumpliendo la hora en punto. Por eso sustituye tempo/series por 'loop'
   // (simulacro de vueltas) y mantiene 'vert' solo si la vuelta real tiene desnivel relevante.
+  // El tipo de sesión de calidad ya no depende solo de la fase: depende de cuánto desnivel por km
+  // tenga la carrera concreta (terrainTier, ver methodology.js). Una carrera "extrema" de desnivel
+  // (skyrace/vertical) satura de desnivel específico casi todas sus sesiones de calidad en vez de
+  // repartir con series/umbral en llano; una carrera "llana" (ultra de recorrido rodante) invierte
+  // el peso hacia series/umbral, dejando el desnivel como mantenimiento; el terreno intermedio
+  // ("montañoso"/"ondulado") se queda con el reparto de siempre.
+  const terrainTier = methodology.terrainTier;
   const qTypes = isBackyard
     ? { base: ['loop'], build: ['loop', 'vert'], specific: ['loop', 'vert'], peak: ['loop', 'vert'], taper: ['loop'] }[phase] || []
-    : { base: ['vert'], build: ['vert', 'intervals'], specific: ['vert', 'tempo'], peak: ['vert', 'tempo'], taper: ['vert'] }[phase] || [];
+    : terrainTier === 'extremo'
+      ? { base: ['vert'], build: ['vert', 'vert'], specific: ['vert', 'vert'], peak: ['vert', 'vert'], taper: ['vert'] }[phase] || []
+      : terrainTier === 'llano'
+        ? { base: ['tempo'], build: ['intervals', 'tempo'], specific: ['tempo', 'intervals'], peak: ['tempo', 'intervals'], taper: ['vert'] }[phase] || []
+        : { base: ['vert'], build: ['vert', 'intervals'], specific: ['vert', 'tempo'], peak: ['vert', 'tempo'], taper: ['vert'] }[phase] || [];
   // Las sesiones de desnivel alternan subida/bajada. Cuando la carrera objetivo es muy técnica de
   // bajada (o estamos ya en específico/peak, priorizando especificidad de montaña) sesgamos hacia
-  // más sesiones de bajada/excéntrico, que es lo que más protege la rodilla en carrera.
+  // más sesiones de bajada/excéntrico, que es lo que más protege la rodilla en carrera — y cuanto
+  // más extremo el desnivel de la carrera, más frecuente conviene que sea esa técnica de bajada.
   const weekIdx = Math.floor(diffDays('2020-01-06', ws) / 7);
   // Con historial de lesiones (o progresión conservadora en general) se retrasa/reduce la
   // frecuencia de bajada: es la sesión con más carga excéntrica y más riesgo si la rodilla o el
-  // tendón no están preparados todavía.
+  // tendón no están preparados todavía. Esto manda siempre, incluso en una carrera extrema de
+  // desnivel: mejor menos bajada bien tolerada que mucha que acabe lesionando antes de la carrera.
   const vertVariant = methodology.progression.downhillCaution
     ? (weekIdx % 4 === 0 ? 'bajada' : 'subida')
-    : methodology.downhillEmphasis
-      ? (weekIdx % 3 === 0 ? 'subida' : 'bajada')
-      : (weekIdx % 2 === 0 ? 'subida' : 'bajada');
+    : terrainTier === 'extremo'
+      ? (weekIdx % 2 === 0 ? 'bajada' : 'subida')
+      : methodology.downhillEmphasis
+        ? (weekIdx % 3 === 0 ? 'subida' : 'bajada')
+        : (weekIdx % 2 === 0 ? 'subida' : 'bajada');
   quality.forEach((i, k) => {
     const t = qTypes[k] || (isBackyard ? 'loop' : 'tempo');
     const d = t === 'loop'

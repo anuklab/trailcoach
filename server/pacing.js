@@ -2,6 +2,7 @@
 // avituallamientos/bases de vida, usando un "km-esfuerzo" (distancia + coste del desnivel)
 // para que las subidas se lleven más tiempo que el llano/bajada, de forma proporcional.
 import { round5 } from './util.js';
+import { estimateStageHours } from './stages.js';
 
 // Coste de esfuerzo aproximado: 100 m de subida ≈ 1 km llano; 100 m de bajada técnica
 // cuesta bastante menos pero no es gratis (frenado). Aproximación estándar en pacing de ultras.
@@ -93,3 +94,24 @@ export function buildPacingPlan(race, aidStations = []) {
 }
 
 function toHours(hhmm) { const [h, m] = hhmm.split(':').map(Number); return h + m / 60; }
+
+// Carreras por etapas: sin GPX por etapa no podemos dar un tramo a tramo como en buildPacingPlan,
+// pero sí repartir el objetivo de tiempo TOTAL entre etapas de forma proporcional a su "km-esfuerzo"
+// (igual que hace effortAtKm, pero sin perfil punto a punto: solo con el km/D+/D- de cada etapa) —
+// así una etapa reina con mucho más desnivel se lleva más tiempo estimado que una etapa corta y llana.
+export function buildStageRacePacing(race, stages) {
+  const running = stages.filter(s => !s.rest);
+  if (!running.length || !race.target_time_h) return null;
+  const withH = estimateStageHours(stages, race.target_time_h);
+  let cumDay = 0;
+  return withH.map((s) => {
+    if (s.rest) return { date: s.date, rest: true };
+    cumDay++;
+    return {
+      date: s.date, rest: false, stage_n: cumDay,
+      km: s.km, dplus_m: s.dplus_m, dminus_m: s.dminus_m,
+      estimated_h: +s.h.toFixed(2), estimated_label: fmtDur(s.h),
+      pace_min_km: s.km ? Math.round(s.h * 60 / s.km) : null,
+    };
+  });
+}

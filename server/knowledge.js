@@ -85,11 +85,22 @@ export const STRENGTH_LIBRARY = {
   },
 };
 
-export function strengthDescription(mode, minutes) {
+// Notas de refuerzo específico por zona lesionada (ver injuryFlags en methodology.js). No sustituye
+// al fisio ni prescribe ejercicios de rehabilitación exactos (eso se sale de lo que esta app puede
+// valorar con seguridad) — pero sí orienta el trabajo de fuerza genérico hacia lo que más suele
+// ayudar a esa zona, en vez de dar exactamente la misma sesión a todo el mundo.
+const INJURY_STRENGTH_NOTE = {
+  isquio: 'Ya que apuntaste una molestia de isquiotibial: prioriza hoy el trabajo excéntrico de isquios (peso muerto a una pierna, nordic curl asistido) antes que sentadilla pesada.',
+  espalda: 'Ya que apuntaste una molestia de espalda/lumbar: prioriza hoy core anti-rotación y de zona media (pallof press, planchas) por delante de cargas axiales pesadas.',
+  cadera: 'Ya que apuntaste una molestia de cadera: prioriza hoy el trabajo de glúteo medio/abductores (monster walk, clam, step-up controlado) para estabilizar la cadera en apoyo unipodal.',
+};
+export function strengthDescription(mode, minutes, injury) {
   const lib = STRENGTH_LIBRARY[mode] || STRENGTH_LIBRARY.gym;
   const head = mode === 'climbing' ? `${Math.round(minutes)} min de escalada/boulder — sustituye la fuerza de hoy:`
     : `${Math.round(minutes)} min:`;
-  return `${head} ${lib.exercises.slice(0, 4).join('; ')}.`;
+  const injuryZone = injury && Object.keys(INJURY_STRENGTH_NOTE).find(z => injury[z]);
+  const note = injuryZone ? ` ${INJURY_STRENGTH_NOTE[injuryZone]}` : '';
+  return `${head} ${lib.exercises.slice(0, 4).join('; ')}.${note}`;
 }
 
 // ---------- Metodología: en qué se basa el plan ----------
@@ -147,9 +158,16 @@ export const ZONE_GUIDE = [
   { zone: 'Z4', pct: [0.80, 0.90], name: 'Umbral anaeróbico', text: 'Duro de verdad: casi no puedes hablar. Series y subidas fuertes; sube el techo de intensidad que puedes sostener.' },
   { zone: 'Z5', pct: [0.90, 1.00], name: 'Máximo', text: 'Esfuerzo máximo o cercano, solo en tramos cortos. Mejora la potencia aeróbica máxima (VO2max).' },
 ];
-// Karvonen: FC objetivo = FC reposo + %esfuerzo x (FC máxima - FC reposo). Devuelve el rango en pulsaciones por minuto para cada zona.
-export function hrZones(hrMax, hrRest) {
-  const max = hrMax || 185, rest = hrRest || 50;
+// Karvonen: FC objetivo = FC reposo + %esfuerzo x (FC máxima - FC reposo). Devuelve el rango en
+// pulsaciones por minuto para cada zona. Si el atleta no ha puesto su FC máxima real (lo más
+// fiable, de una prueba de esfuerzo o un test de campo), antes se usaba un valor fijo de 185 para
+// todo el mundo — igual para alguien de 25 años que de 65. Ahora, con la edad que ya se pide en
+// Ajustes, se estima con la fórmula de Tanaka (208 − 0.7 × edad), más precisa que la clásica
+// "220 − edad" sobre todo en edades más avanzadas. Se marca `estimated: true` para poder avisar en
+// la interfaz de que son zonas aproximadas, no medidas.
+export function hrZones(hrMax, hrRest, age) {
+  const max = hrMax || (age ? Math.round(208 - 0.7 * age) : 185);
+  const rest = hrRest || 50;
   const reserve = Math.max(1, max - rest);
   return ZONE_GUIDE.map(z => ({
     ...z,

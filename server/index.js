@@ -12,7 +12,8 @@ import { applyCheckin, editSession, recalcFrom, naturalAdjust, applyRpeFeedback 
 import { fitnessSeries, currentFitness } from './load.js';
 import { authUrl, exchangeCode, syncStrava, stravaStatus, stravaConfigured, disconnectStrava } from './strava.js';
 import { adherenceStatus, monthSummary, backfillSessionMatches } from './adherence.js';
-import { buildPacingPlan } from './pacing.js';
+import { buildPacingPlan, buildStageRacePacing } from './pacing.js';
+import { parseStages, stagesTotals } from './stages.js';
 import * as Nutrition from './nutrition.js';
 import { NUTRITION_GUIDE, STRENGTH_GUIDE, STRENGTH_LIBRARY, nutritionTargetsFor, METHOD_GUIDE, hrZones, GEL_PRESETS } from './knowledge.js';
 import { estimateVO2max } from './vo2.js';
@@ -266,6 +267,25 @@ app.post('/api/adjust/ask', wrap(async (req, res) => res.json(await naturalAdjus
 // atrás), simplemente deja de ofrecerse como carrera activa.
 const RACE_CAPS = { A: 1, B: 3, C: 6 };
 function normalizeRaceType(t) { return ['backyard', 'stage'].includes(t) ? t : 'ultra'; }
+// Para una carrera por etapas, el atleta rellena un array `stages` (uno por día del rango, con su
+// propio km/D+/D- o marcado como descanso) en vez de una sola distancia/desnivel. Aquí derivamos
+// name/date/distance_km/dplus_m/dminus_m/n_stages a partir de ese array, para que el resto del
+// código (tarjetas, estimaciones, generación del plan) siga leyendo los mismos campos de siempre.
+function applyStagesInput(input, type) {
+  if (type !== 'stage' || !input.stages) return input;
+  const stages = parseStages({ stages: input.stages });
+  if (!stages.length) return input;
+  const totals = stagesTotals(stages);
+  return {
+    ...input,
+    stages: JSON.stringify(stages),
+    date: totals.start_date || input.date,
+    n_stages: totals.n_stages,
+    distance_km: totals.distance_km,
+    dplus_m: totals.dplus_m,
+    dminus_m: totals.dminus_m,
+  };
+}
 function checkRaceCap(userId, priority, excludeId) {
   const cap = RACE_CAPS[priority];
   if (!cap) return null;
@@ -279,34 +299,38 @@ function checkRaceCap(userId, priority, excludeId) {
 }
 app.get('/api/races', wrap((req, res) => res.json(racesFor(req.userId).filter(r => r.date >= today()))));
 app.post('/api/races', wrap((req, res) => {
-  const r = req.body;
+  const r = applyStagesInput(req.body, normalizeRaceType(req.body.type));
   const priority = r.priority || 'A';
   const capErr = checkRaceCap(req.userId, priority);
   if (capErr) return res.status(400).json({ error: capErr });
-  const info = db.prepare(`INSERT INTO races(user_id,name,date,priority,type,distance_km,dplus_m,dminus_m,time_limit_h,target_time_h,start_time,profile,climbs,aid_stations,notes,n_stages)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.userId, r.name, r.date, priority, normalizeRaceType(r.type),
+  const info = db.prepare(`INSERT INTO races(user_id,name,date,priority,type,distance_km,dplus_m,dminus_m,time_limit_h,target_time_h,start_time,profile,climbs,aid_stations,notes,n_stages,stages)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.userId, r.name, r.date, priority, normalizeRaceType(r.type),
     r.distance_km || null, r.dplus_m || null,
     r.dminus_m || null, r.time_limit_h || null, r.target_time_h || null, r.start_time || null,
     r.profile ? JSON.stringify(r.profile) : null, r.climbs ? JSON.stringify(r.climbs) : null,
-    r.aid_stations ? JSON.stringify(r.aid_stations) : null, r.notes || null, r.n_stages || null);
+    r.aid_stations ? JSON.stringify(r.aid_stations) : null, r.notes || null, r.n_stages || null,
+    typeof r.stages === 'string' ? r.stages : (r.stages ? JSON.stringify(r.stages) : null));
   res.json(db.prepare('SELECT * FROM races WHERE id=? AND user_id=?').get(info.lastInsertRowid, req.userId));
 }));
 app.patch('/api/races/:id', wrap((req, res) => {
-  const r = req.body; const cur = db.prepare('SELECT * FROM races WHERE id=? AND user_id=?').get(req.params.id, req.userId);
+  const cur = db.prepare('SELECT * FROM races WHERE id=? AND user_id=?').get(req.params.id, req.userId);
   if (!cur) return res.status(404).json({ error: 'No encontrada' });
+  const r = applyStagesInput(req.body, normalizeRaceType(req.body.type ?? cur.type));
   const merged = { ...cur, ...r };
   if (merged.priority !== cur.priority) {
     const capErr = checkRaceCap(req.userId, merged.priority, req.params.id);
     if (capErr) return res.status(400).json({ error: capErr });
   }
-  db.prepare(`UPDATE races SET name=?,date=?,priority=?,type=?,distance_km=?,dplus_m=?,dminus_m=?,time_limit_h=?,target_time_h=?,start_time=?,profile=?,climbs=?,aid_stations=?,notes=?,n_stages=? WHERE id=? AND user_id=?`)
+  db.prepare(`UPDATE races SET name=?,date=?,priority=?,type=?,distance_km=?,dplus_m=?,dminus_m=?,time_limit_h=?,target_time_h=?,start_time=?,profile=?,climbs=?,aid_stations=?,notes=?,n_stages=?,stages=? WHERE id=? AND user_id=?`)
     .run(merged.name, merged.date, merged.priority, normalizeRaceType(merged.type),
       merged.distance_km, merged.dplus_m, merged.dminus_m, merged.time_limit_h,
       merged.target_time_h, merged.start_time,
       typeof merged.profile === 'string' ? merged.profile : JSON.stringify(merged.profile),
       typeof merged.climbs === 'string' ? merged.climbs : JSON.stringify(merged.climbs),
       typeof merged.aid_stations === 'string' ? merged.aid_stations : JSON.stringify(merged.aid_stations),
-      merged.notes, merged.n_stages || null, req.params.id, req.userId);
+      merged.notes, merged.n_stages || null,
+      typeof merged.stages === 'string' ? merged.stages : (merged.stages ? JSON.stringify(merged.stages) : null),
+      req.params.id, req.userId);
   res.json(db.prepare('SELECT * FROM races WHERE id=? AND user_id=?').get(req.params.id, req.userId));
 }));
 app.delete('/api/races/:id', wrap((req, res) => { db.prepare('DELETE FROM races WHERE id=? AND user_id=?').run(req.params.id, req.userId); res.json({ ok: true }); }));
@@ -327,6 +351,13 @@ app.get('/api/races/:id/estimate', wrap((req, res) => {
 app.get('/api/races/:id/pacing', wrap((req, res) => {
   const r = db.prepare('SELECT * FROM races WHERE id=? AND user_id=?').get(req.params.id, req.userId);
   if (!r) return res.status(404).json({ error: 'No encontrada' });
+  if (r.type === 'stage') {
+    const stages = parseStages(r);
+    if (!stages.length) return res.status(400).json({ error: 'Añade las etapas de la carrera antes de calcular el reparto de tiempo.' });
+    const perStage = buildStageRacePacing(r, stages);
+    if (!perStage) return res.status(400).json({ error: 'Falta el objetivo de tiempo total para poder repartirlo entre etapas.' });
+    return res.json({ stages: perStage, target_time_h: r.target_time_h });
+  }
   const race = { ...r, profile: r.profile ? JSON.parse(r.profile) : null };
   const aid = r.aid_stations ? JSON.parse(r.aid_stations) : [];
   const plan = buildPacingPlan(race, aid);
@@ -438,11 +469,13 @@ app.get('/api/nutrition/targets', wrap((req, res) => {
 // ---------- Conocimiento (guía basada en evidencia) ----------
 app.get('/api/knowledge', wrap((req, res) => {
   const st = getSettings(req.userId);
+  const age = st.birth_date ? Math.floor(diffDays(st.birth_date, today()) / 365.25) : null;
   res.json({
     nutrition: NUTRITION_GUIDE, strength: STRENGTH_GUIDE,
     strength_library: Object.fromEntries(Object.entries(STRENGTH_LIBRARY).map(([k, v]) => [k, { label: v.label, exercises: v.exercises, note: v.note || null }])),
     method: METHOD_GUIDE,
-    zones: hrZones(st.hr_max, st.hr_rest),
+    zones: hrZones(st.hr_max, st.hr_rest, age),
+    zones_estimated: !st.hr_max,
     gel_presets: GEL_PRESETS,
   });
 }));

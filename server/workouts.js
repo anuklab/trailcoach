@@ -92,9 +92,11 @@ export function describe(s, ctx = {}) {
 
   switch (s.type) {
     case 'rest':
-      title = s.variant === 'postcarrera' ? 'Descanso post-carrera' : 'Descanso';
+      title = s.variant === 'postcarrera' ? 'Descanso post-carrera' : s.variant === 'etapa_descanso' ? 'Descanso entre etapas' : 'Descanso';
       desc = s.variant === 'postcarrera'
         ? 'Sin correr. Caminar suave, estirar, dormir bien, hidratarte y comer con normalidad. Hoy toca recuperar, no entrenar — el cuerpo se adapta en el descanso, no en el esfuerzo.'
+        : s.variant === 'etapa_descanso'
+        ? 'Día de descanso dentro de la propia carrera por etapas. Nada de kilómetros: piernas en alto, foam roller/masaje si tienes, recarga de glucógeno (come más de lo que crees) y duerme todo lo que puedas — mañana sigue la carrera.'
         : 'Día libre de carrera. Movilidad, foam roller o estiramiento suave si apetece. Sin correr.';
       break;
     case 'easy':
@@ -149,7 +151,7 @@ export function describe(s, ctx = {}) {
     case 'strength': {
       const mode = ctx.settings?.strength_mode || 'gym';
       title = mode === 'climbing' ? 'Roco (fuerza + técnica)' : `Fuerza — ${(STRENGTH_LIBRARY[mode] || STRENGTH_LIBRARY.gym).label}`;
-      desc = strengthDescription(mode, s.duration_min);
+      desc = strengthDescription(mode, s.duration_min, ctx.methodology?.progression?.injury);
       break;
     }
     case 'cross':
