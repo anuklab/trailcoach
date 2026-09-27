@@ -1,5 +1,5 @@
 // Sincronización con Apple Health (vía el plugin capacitor-health, solo en la app nativa de iOS).
-// A diferencia de Strava (que es un servidor con el que TrailCoach habla directamente por OAuth),
+// A diferencia de Strava (que es un servidor con el que ULTRALAB - TRAILCOACH habla directamente por OAuth),
 // Apple Health solo es accesible desde dentro del propio dispositivo: es la app (JS, en public/app.js)
 // quien pide permiso, consulta los entrenos con el plugin, y nos los manda aquí ya en JSON — este
 // módulo simplemente los guarda y los empareja con la sesión planificada del día, igual que hacemos

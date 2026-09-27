@@ -21,7 +21,7 @@ async function getTransporter() {
       auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
     });
   } catch (e) {
-    console.error('[TrailCoach] No se pudo inicializar el envío de correo (¿falta instalar nodemailer?):', e.message);
+    console.error('[ULTRALAB - TRAILCOACH] No se pudo inicializar el envío de correo (¿falta instalar nodemailer?):', e.message);
     transporter = null;
   }
   return transporter;
@@ -35,14 +35,14 @@ export function mailConfigured() {
 export async function sendMail({ to, subject, text }) {
   const t = await getTransporter();
   if (!t) {
-    console.warn(`[TrailCoach] SMTP no configurado: correo NO enviado a ${to}. Asunto: "${subject}". Cuerpo:\n${text}`);
+    console.warn(`[ULTRALAB - TRAILCOACH] SMTP no configurado: correo NO enviado a ${to}. Asunto: "${subject}". Cuerpo:\n${text}`);
     return { sent: false };
   }
   try {
     await t.sendMail({ from: process.env.SMTP_FROM || SMTP_USER_FALLBACK(), to, subject, text });
     return { sent: true };
   } catch (e) {
-    console.error('[TrailCoach] Error enviando correo:', e.message);
+    console.error('[ULTRALAB - TRAILCOACH] Error enviando correo:', e.message);
     changelog(null, 'mail', `Fallo enviando correo a ${to}: ${e.message}`);
     return { sent: false };
   }

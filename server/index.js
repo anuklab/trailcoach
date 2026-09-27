@@ -121,8 +121,8 @@ app.post('/api/password/forgot', rateLimit('forgot', 6, 15 * 60 * 1000), async (
     const base = `${req.protocol}://${req.get('host')}`;
     const link = `${base}/?reset=${token}`;
     await sendMail({
-      to: user.email, subject: 'Recupera tu contraseña de TrailCoach',
-      text: `Alguien (esperamos que tú) pidió restablecer la contraseña de tu cuenta de TrailCoach.\n\nEntra en este enlace para elegir una nueva contraseña (caduca en 1 hora):\n${link}\n\nSi no has sido tú, ignora este correo — tu contraseña sigue igual.`,
+      to: user.email, subject: 'Recupera tu contraseña de ULTRALAB - TRAILCOACH',
+      text: `Alguien (esperamos que tú) pidió restablecer la contraseña de tu cuenta de ULTRALAB - TRAILCOACH.\n\nEntra en este enlace para elegir una nueva contraseña (caduca en 1 hora):\n${link}\n\nSi no has sido tú, ignora este correo — tu contraseña sigue igual.`,
     });
     log(user.id, 'auth', 'Solicitado restablecimiento de contraseña');
   }
@@ -150,7 +150,7 @@ app.use('/api', (req, res, next) => {
   // el pago, borrar su cuenta o cambiar la contraseña incluso estando bloqueada.
   const allowlist = ['/me', '/billing/checkout', '/billing/portal', '/billing/cancel', '/account', '/support'];
   if (billingConfigured() && !billingAccess(user).allowed && !allowlist.includes(req.path)) {
-    return res.status(402).json({ error: 'Tu periodo de prueba ha terminado. Suscríbete para seguir usando TrailCoach.', billing: billingAccess(user) });
+    return res.status(402).json({ error: 'Tu periodo de prueba ha terminado. Suscríbete para seguir usando ULTRALAB - TRAILCOACH.', billing: billingAccess(user) });
   }
   next();
 });
@@ -440,7 +440,7 @@ app.post('/api/support', rateLimit('support', 10, 15 * 60 * 1000), wrap(async (r
   if (!message) return res.status(400).json({ error: 'Escribe tu mensaje antes de enviarlo.' });
   const to = process.env.SUPPORT_EMAIL || 'martialonso@anuklab.com';
   const result = await sendMail({
-    to, subject: `[TrailCoach] Soporte — ${user.name || user.email}`,
+    to, subject: `[ULTRALAB - TRAILCOACH] Soporte — ${user.name || user.email}`,
     text: `De: ${user.name || '(sin nombre)'} <${user.email}> (usuario #${user.id})\n\n${message}`,
   });
   log(req.userId, 'support', 'Mensaje de soporte enviado', { sent: result.sent });
@@ -517,5 +517,5 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`TrailCoach escuchando en :${PORT}`));
+app.listen(PORT, () => console.log(`ULTRALAB - TRAILCOACH escuchando en :${PORT}`));
 startPushScheduler();

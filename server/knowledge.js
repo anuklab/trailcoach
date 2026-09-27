@@ -105,7 +105,7 @@ export function strengthDescription(mode, minutes, injury) {
 
 // ---------- Metodología: en qué se basa el plan ----------
 export const METHOD_GUIDE = {
-  overview: 'TrailCoach no sigue una única metodología: combina varias piezas reales del entrenamiento de resistencia y ultra trail, y decide cada semana qué mezcla aplica según tu carrera objetivo, tu nivel, tu disponibilidad y tu fatiga real — no un calendario fijo de 12-16 semanas.',
+  overview: 'ULTRALAB - TRAILCOACH no sigue una única metodología: combina varias piezas reales del entrenamiento de resistencia y ultra trail, y decide cada semana qué mezcla aplica según tu carrera objetivo, tu nivel, tu disponibilidad y tu fatiga real — no un calendario fijo de 12-16 semanas.',
   items: [
     {
       title: 'Carga: modelo TRIMP / Banister (Forma, Fatiga, Frescura)',

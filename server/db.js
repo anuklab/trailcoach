@@ -12,7 +12,7 @@ export const db = new DatabaseSync(process.env.DB_FILE || path.join(DATA_DIR, 't
 // (iCloud Drive, Google Drive, unidades de red...). Si falla, seguimos con el modo por defecto,
 // que funciona en cualquier carpeta aunque sea un poco más lento.
 try { db.exec('PRAGMA journal_mode = WAL;'); }
-catch { db.exec('PRAGMA journal_mode = DELETE;'); console.warn('[TrailCoach] SQLite WAL no disponible en esta carpeta (¿iCloud/Drive/red?); usando modo de journal estándar.'); }
+catch { db.exec('PRAGMA journal_mode = DELETE;'); console.warn('[ULTRALAB - TRAILCOACH] SQLite WAL no disponible en esta carpeta (¿iCloud/Drive/red?); usando modo de journal estándar.'); }
 db.exec('PRAGMA foreign_keys = ON;');
 
 db.exec(`
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS past_races (
 );
 
 -- id = id de la actividad en Strava (globalmente único entre todas las cuentas de Strava),
--- o negativo si es manual. user_id identifica de quién es dentro de TrailCoach.
+-- o negativo si es manual. user_id identifica de quién es dentro de ULTRALAB - TRAILCOACH.
 CREATE TABLE IF NOT EXISTS activities (
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
