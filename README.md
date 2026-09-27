@@ -1,4 +1,4 @@
-# TrailCoach
+# ULTRALAB - TRAILCOACH
 
 Tu entrenador personal de ultra trail running. Web app privada (funciona como app instalable en el móvil, PWA), pensada específicamente para corredores de ultra trail — no para running de ruta. Es multiusuario: cada persona crea su propia cuenta (email + contraseña) y sus datos se guardan en tu propio servidor, en una base de datos SQLite — nada en la nube de terceros salvo lo que cada usuario conecte (Strava, y opcionalmente la IA de Claude).
 
@@ -62,7 +62,7 @@ Los datos viven en un volumen de Docker (`trailcoach-data`), así que sobreviven
 Cada usuario conecta su propia cuenta de Strava desde su perfil; los tokens se guardan por usuario, no son compartidos.
 
 1. Entra en [strava.com/settings/api](https://www.strava.com/settings/api) y crea una aplicación:
-   - **Nombre**: TrailCoach (o lo que quieras).
+   - **Nombre**: ULTRALAB - TRAILCOACH (o lo que quieras).
    - **Website**: `https://trail.tudominio.com`
    - **Authorization Callback Domain**: `trail.tudominio.com` (sin `https://`, sin barra al final).
 2. Strava te da un **Client ID** y un **Client Secret**. Ponlos en tu `.env` (son de la app, no de cada usuario):
@@ -105,7 +105,7 @@ Checkout y el Portal de cliente de Stripe — páginas alojadas por Stripe — a
 de tarjeta.
 
 1. Crea una cuenta en [Stripe](https://dashboard.stripe.com) (puedes probar todo esto en modo test primero).
-2. En **Productos**, crea un producto "TrailCoach" con dos precios recurrentes:
+2. En **Productos**, crea un producto "ULTRALAB - TRAILCOACH" con dos precios recurrentes:
    - Mensual: 9,99 € / mes
    - Anual: 99,90 € / año (equivale a 2 meses gratis frente al mensual)
    Copia el ID de cada precio (`price_...`).
