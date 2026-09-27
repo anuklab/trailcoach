@@ -2,7 +2,9 @@ import express from 'express';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, getSettings, setSettings, log, createUser, getUserByEmail, getUserById, verifyPassword, getAvatar, setAvatar, setPassword, deleteUser, createPasswordReset, consumePasswordReset, billingAccess } from './db.js';
+import { db, getSettings, setSettings, log, createUser, getUserByEmail, getUserById, verifyPassword, getAvatar, setAvatar, setPassword, deleteUser, createPasswordReset, consumePasswordReset, billingAccess, registerPushToken, unregisterPushToken } from './db.js';
+import { startPushScheduler } from './push.js';
+import { syncHealthWorkouts } from './health.js';
 import { sendMail } from './mailer.js';
 import { billingConfigured, createCheckoutSession, createPortalSession, cancelSubscription, handleWebhookEvent } from './billing.js';
 import { today, addDays, mondayOf, diffDays } from './util.js';
@@ -394,6 +396,28 @@ app.get('/api/activities', wrap((req, res) => {
 // ---------- Ajustes ----------
 app.get('/api/settings', wrap((req, res) => res.json(getSettings(req.userId))));
 app.put('/api/settings', wrap((req, res) => res.json(setSettings(req.userId, req.body))));
+
+// ---------- Notificaciones push (app nativa) ----------
+// La app (vía Capacitor) manda aquí el token del dispositivo tras pedir permiso al usuario.
+app.post('/api/push/register', wrap((req, res) => {
+  const { token, platform } = req.body || {};
+  if (!token) return res.status(400).json({ error: 'Falta el token' });
+  registerPushToken(req.userId, token, platform);
+  res.json({ ok: true });
+}));
+app.post('/api/push/unregister', wrap((req, res) => {
+  const { token } = req.body || {};
+  if (token) unregisterPushToken(token);
+  res.json({ ok: true });
+}));
+
+// ---------- Apple Health (app nativa iOS, vía capacitor-health) ----------
+// La propia app consulta HealthKit en el dispositivo y nos manda aquí los entrenos ya en JSON;
+// aquí solo los guardamos y los emparejamos con la sesión planificada del día (server/health.js).
+app.post('/api/health/sync', wrap((req, res) => {
+  const workouts = Array.isArray(req.body?.workouts) ? req.body.workouts : [];
+  res.json(syncHealthWorkouts(req.userId, workouts));
+}));
 // Foto de perfil: se sube ya redimensionada/comprimida desde el cliente (data URL), con un
 // límite generoso en el servidor (~800KB en base64) para evitar abusos.
 app.put('/api/avatar', wrap((req, res) => {
@@ -494,3 +518,4 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'in
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`TrailCoach escuchando en :${PORT}`));
+startPushScheduler();

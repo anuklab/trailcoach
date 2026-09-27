@@ -130,6 +130,18 @@ CREATE TABLE IF NOT EXISTS password_resets (
   used INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Un dispositivo (móvil, app nativa vía Capacitor) por el que un usuario puede recibir
+-- notificaciones push. Un mismo usuario puede tener varios (varios dispositivos); un mismo
+-- token nunca se repite (si el móvil se reinstala la app, el token puede reaparecer para
+-- otro usuario si cambió de cuenta, por eso token es UNIQUE y se sobrescribe el user_id).
+CREATE TABLE IF NOT EXISTS push_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  platform TEXT,               -- 'ios' | 'android'
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 `);
 
 // Migraciones ligeras: añade columnas nuevas si la base de datos ya existía sin ellas
@@ -172,6 +184,16 @@ ensureColumn('users', 'stripe_subscription_id', 'TEXT');
 ensureColumn('users', 'subscription_status', "TEXT DEFAULT 'trialing'"); // trialing, active, past_due, canceled
 ensureColumn('users', 'subscription_plan', 'TEXT'); // monthly, yearly
 ensureColumn('users', 'trial_ends_at', 'TEXT');
+// Notificaciones push (app nativa): fecha (YYYY-MM-DD) del último aviso diario/semanal ya
+// enviado, para no duplicar avisos si el proceso se reinicia varias veces el mismo día.
+ensureColumn('users', 'last_notif_daily_date', 'TEXT');
+ensureColumn('users', 'last_notif_weekly_date', 'TEXT');
+// Origen de una actividad: 'strava' (histórico, valor por defecto) o 'health' (Apple Health,
+// sincronizada desde la app nativa vía capacitor-health). source_id guarda el identificador
+// que le da esa fuente — para Health no es numérico, así que 'id' pasa a autoincrementarse
+// y la coincidencia para no duplicar se hace por (user_id, source, source_id).
+ensureColumn('activities', 'source', "TEXT DEFAULT 'strava'");
+ensureColumn('activities', 'source_id', 'TEXT');
 
 // Los índices por user_id se crean aquí, después de las migraciones, para garantizar
 // que la columna ya existe (en una base de datos previa a multiusuario, no existía
@@ -185,6 +207,8 @@ CREATE INDEX IF NOT EXISTS idx_checkins_user_date ON checkins(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_changelog_user ON changelog(user_id);
 CREATE INDEX IF NOT EXISTS idx_nutri_user_date ON nutrition_logs(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_resets(token_hash);
+CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_activities_source ON activities(user_id, source, source_id);
 `);
 
 // ---------- Autenticación ----------
@@ -265,6 +289,8 @@ export const DEFAULT_SETTINGS = {
   injury_history: '', // texto libre: lesiones pasadas/crónicas — el planificador se vuelve más conservador si hay algo aquí
   onboarding_done: false, // controla si se ha completado el asistente inicial (datos + objetivo)
   language: 'es', // idioma de la interfaz: es, en, fr, ca
+  notif_daily: true,   // aviso push cada día con el entreno de hoy (solo app nativa)
+  notif_weekly: true,  // aviso push el domingo por la tarde con el resumen de la semana que viene
 };
 
 // Los ajustes viven por usuario, en users.settings (JSON), fusionados con los valores por defecto.
@@ -278,6 +304,38 @@ export function setSettings(userId, patch) {
   const merged = { ...getSettings(userId), ...patch };
   db.prepare('UPDATE users SET settings = ? WHERE id = ?').run(JSON.stringify(merged), userId);
   return merged;
+}
+
+// ---------- Notificaciones push ----------
+// Un token puede haber pertenecido antes a otro usuario (móvil reinstalado con otra cuenta),
+// por eso al registrar se sobrescribe el user_id si el token ya existía.
+export function registerPushToken(userId, token, platform) {
+  db.prepare(`
+    INSERT INTO push_tokens(user_id, token, platform) VALUES(?,?,?)
+    ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, platform = excluded.platform
+  `).run(userId, token, platform || null);
+}
+export function unregisterPushToken(token) {
+  db.prepare('DELETE FROM push_tokens WHERE token = ?').run(token);
+}
+export function pushTokensFor(userId) {
+  return db.prepare('SELECT token, platform FROM push_tokens WHERE user_id = ?').all(userId);
+}
+export function removePushTokens(tokens) {
+  if (!tokens.length) return;
+  const qs = tokens.map(() => '?').join(',');
+  db.prepare(`DELETE FROM push_tokens WHERE token IN (${qs})`).run(...tokens);
+}
+// Todos los usuarios con al menos un dispositivo registrado (candidatos a recibir avisos).
+export function usersWithPushTokens() {
+  return db.prepare(`
+    SELECT DISTINCT u.id, u.settings, u.last_notif_daily_date, u.last_notif_weekly_date
+    FROM users u JOIN push_tokens t ON t.user_id = u.id
+  `).all();
+}
+export function markNotifSent(userId, kind, date) {
+  const col = kind === 'daily' ? 'last_notif_daily_date' : 'last_notif_weekly_date';
+  db.prepare(`UPDATE users SET ${col} = ? WHERE id = ?`).run(date, userId);
 }
 
 // ---------- Foto de perfil ----------
