@@ -5,7 +5,7 @@ import { addDays, today } from './util.js';
 
 const WINDOW = 14; // días que miramos hacia atrás
 
-// Mensajes de adherencia en los 5 idiomas de la interfaz (nav_hoy, etc. en public/i18n.js).
+// Mensajes de adherencia en los 4 idiomas de la interfaz (nav_hoy, etc. en public/i18n.js).
 // Solo estas 5 plantillas — a diferencia de las descripciones de sesión (generadas en
 // workouts.js), que siguen en castellano por ahora — se traducen aquí porque son un conjunto
 // pequeño y cerrado de mensajes, no prosa libre.
@@ -37,13 +37,6 @@ const ADHERENCE_MSG = {
     atencion: (pct) => `Vas una mica fluix aquesta quinzena (${pct}% de compliment). No passa res per un bache, però si continua així convé ajustar el pla a alguna cosa més realista.`,
     en_camino: (pct) => `Vas molt ben encaminat: ${pct}% de compliment en les últimes dues setmanes. Segueix així.`,
     estable: (pct) => `Progressió estable (${pct}% de compliment). Tot en ordre.`,
-  },
-  oc: {
-    sin_datos: () => 'Encara non i a pro donadas entà valorar era tua progression.',
-    flojeando: (streak) => `Pòrtes ${streak} dies de seguit sense acabar entrainaments. Ei bon moment entà demandar-te per qué (manca de temps, de motivacion, bèra molèstia?) — se cau tornar planificar objectius, ditz-m'ac e ac ajustam amassa.`,
-    atencion: (pct) => `Vas un shinhau fluish aguesta quinzena (${pct}% de compliment). Non i a arren de mau per un bache, mès se contunha atau cau ajustar eth plan a quauquarren mès realista.`,
-    en_camino: (pct) => `Vas fòrça ben encaminat: ${pct}% de compliment enes darrères dues setmanas. Contunha atau.`,
-    estable: (pct) => `Progression establa (${pct}% de compliment). Tot en òrdre.`,
   },
 };
 function adherenceMsg(lang, key, ...args) {
