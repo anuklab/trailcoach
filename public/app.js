@@ -1466,6 +1466,21 @@ async function renderAjustes() {
       <p class="muted small">${t('settings_injuries_hint')}</p>
       <textarea id="s-injuries" rows="3" placeholder="${t('settings_injuries_ph')}">${esc(s.injury_history || '')}</textarea>
     </div>
+    <div class="card">
+      <h2>${t('settings_notifications')}</h2>
+      ${isNativeApp() ? '' : `<p class="muted small">${t('settings_notif_native_hint')}</p>`}
+      <label><input type="checkbox" id="s-notifdaily" ${s.notif_daily !== false ? 'checked' : ''} style="width:auto"> ${t('settings_notif_daily')}</label>
+      <label><input type="checkbox" id="s-notifweekly" ${s.notif_weekly !== false ? 'checked' : ''} style="width:auto"> ${t('settings_notif_weekly')}</label>
+    </div>
+    ${healthAvailable() || nativePlatform() === 'ios' ? `
+    <div class="card">
+      <h2>${t('settings_apple_health')}</h2>
+      <p class="muted small">${t('settings_apple_health_hint')}</p>
+      ${isHealthConnected()
+        ? `<p class="small" style="color:var(--accent, #2a8a4a)">✓ ${t('settings_apple_health_connected')}</p>
+           <button style="width:100%" onclick="syncAppleHealthNow()">${t('settings_apple_health_sync')}</button>`
+        : `<button class="primary" style="width:100%" onclick="connectAppleHealth()">${t('settings_apple_health_connect')}</button>`}
+    </div>` : ''}
     <button class="primary" style="width:100%" onclick="saveSettings()">${t('settings_save')}</button>
     <div class="card" style="margin-top:20px">
       <h2>${t('settings_account')}</h2>
@@ -1616,6 +1631,7 @@ async function saveSettings() {
     strength: $('#s-strength').checked, strength_mode: modeChip ? modeChip.dataset.v : 'gym', poles: $('#s-poles').checked,
     hr_max: +$('#s-hrmax').value, hr_rest: +$('#s-hrrest').value, weight_kg: +$('#s-weight').value || 70,
     injury_history: $('#s-injuries').value.trim(),
+    notif_daily: $('#s-notifdaily').checked, notif_weekly: $('#s-notifweekly').checked,
   });
   toast(t('toast_settings_saved'));
   if (confirm(t('confirm_regen_after_settings'))) await regenPlan();
@@ -1885,6 +1901,58 @@ function showUpdateBanner(sw) {
   }).catch(() => {});
   $('#updateBannerBtn').onclick = () => { sw.postMessage('skipWaiting'); el.remove(); };
 }
+// ---------------- App nativa (Capacitor): notificaciones push + Apple Health ----------------
+// Todo esto es un no-op silencioso cuando la web se abre en un navegador normal: `window.Capacitor`
+// solo existe cuando la página corre dentro de la app envuelta con Capacitor (iOS/Android).
+function isNativeApp() { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+function nativePlatform() { return window.Capacitor?.getPlatform?.() || 'web'; }
+
+async function initNativePush() {
+  if (!isNativeApp()) return;
+  const PN = window.Capacitor.Plugins?.PushNotifications;
+  if (!PN) return;
+  try {
+    const perm = await PN.requestPermissions();
+    if (perm.receive !== 'granted') return;
+    await PN.addListener('registration', async (token) => {
+      try { await post('/push/register', { token: token.value, platform: nativePlatform() }); }
+      catch (e) { console.warn('No se pudo registrar el token de notificaciones:', e.message); }
+    });
+    await PN.addListener('registrationError', (err) => console.warn('Error registrando notificaciones push:', err));
+    // Al tocar una notificación (o recibirla en primer plano), simplemente llevamos a la pestaña de hoy/plan.
+    await PN.addListener('pushNotificationActionPerformed', () => { if (typeof selectTab === 'function') selectTab('hoy'); });
+    await PN.register();
+  } catch (e) { console.warn('Push notifications no disponibles:', e.message); }
+}
+
+// Apple Health: solo tiene sentido en iOS. Se pide permiso de forma explícita (botón en Ajustes),
+// nunca automáticamente al abrir la app, siguiendo las guías de Apple sobre datos de salud.
+function healthAvailable() { return isNativeApp() && nativePlatform() === 'ios' && !!window.Capacitor.Plugins?.HealthPlugin; }
+async function connectAppleHealth() {
+  if (!healthAvailable()) return;
+  const Health = window.Capacitor.Plugins.HealthPlugin;
+  try {
+    const { available } = await Health.isHealthAvailable();
+    if (!available) { toast(t('health_not_available')); return; }
+    await Health.requestHealthPermissions({ permissions: ['READ_WORKOUTS', 'READ_HEART_RATE', 'READ_DISTANCE', 'READ_ACTIVE_CALORIES'] });
+    try { localStorage.setItem('tc_health_connected', '1'); } catch {}
+    await syncAppleHealthNow();
+    if (currentTab === 'ajustes') renderAjustes();
+  } catch (e) { toast(t('err_prefix') + e.message); }
+}
+async function syncAppleHealthNow() {
+  if (!healthAvailable()) return;
+  const Health = window.Capacitor.Plugins.HealthPlugin;
+  try {
+    const endDate = new Date().toISOString();
+    const startDate = new Date(Date.now() - 14 * 86400000).toISOString();
+    const { workouts } = await Health.queryWorkouts({ startDate, endDate, includeHeartRate: true, includeRoute: false, includeSteps: false });
+    const r = await post('/health/sync', { workouts: workouts || [] });
+    toast(t('health_sync_done').replace('{n}', r.synced));
+  } catch (e) { toast(t('err_prefix') + e.message); }
+}
+function isHealthConnected() { try { return localStorage.getItem('tc_health_connected') === '1'; } catch { return false; } }
+
 async function boot() {
   applyStaticI18n();
   if (!Auth.token) { showLogin(); return; }
@@ -1898,6 +1966,7 @@ async function boot() {
   }
   if (me.billing && me.billing.configured && !me.billing.allowed) { showPaywall(me.billing); return; }
   updateProfileBtn(me.avatar);
+  initNativePush();
   let s = null;
   try { s = await get('/settings'); } catch {}
   if (s && s.language && s.language !== currentLang) { setLang(s.language); applyStaticI18n(); relabelTabbar(); }
