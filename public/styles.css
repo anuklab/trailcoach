@@ -209,6 +209,15 @@ table.simple td, table.simple th { padding: 6px 4px; border-bottom: 1px solid va
 .split-row:last-child { border-bottom: none; font-weight: 700; }
 .split-row .name { flex: 1; } .split-row .t { color: var(--muted); text-align: right; min-width: 64px; }
 
+/* Editor de etapas (carrera por etapas): una fila por día del rango */
+.stage-row { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; }
+.stage-row.is-rest { opacity: .6; background: var(--panel2); }
+.stage-row-date { font-size: .85rem; margin-bottom: 6px; }
+.stage-row-fields { gap: 6px; align-items: center; }
+.stage-row-fields input[type=number] { flex: 1 1 60px; min-width: 0; }
+.stage-rest-toggle { display: flex; align-items: center; gap: 4px; white-space: nowrap; flex: 1 1 100%; justify-content: flex-end; }
+.stage-rest-toggle input { width: auto; }
+
 /* Nutrición */
 .nutri-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); gap: 8px; }
 .nutri-row:last-child { border-bottom: none; }

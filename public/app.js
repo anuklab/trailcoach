@@ -766,21 +766,25 @@ function raceRow(r) {
   const prio = { A: t('race_priority_a'), B: t('race_priority_b'), C: t('race_priority_c') }[r.priority] || r.priority;
   const isBY = r.type === 'backyard';
   const isStage = r.type === 'stage';
+  const stages = isStage && r.stages ? (typeof r.stages === 'string' ? JSON.parse(r.stages) : r.stages) : [];
+  const restDays = stages.filter(s => s.rest).length;
   const typeLabel = isBY ? ` · ${t('race_type_backyard')}` : isStage ? ` · ${t('race_type_stage')} (${r.n_stages || '?'})` : '';
   return `<div class="card" data-race="${r.id}">
     <div style="display:flex;justify-content:space-between;cursor:pointer" onclick="raceModal(${r.id})">
       <strong>${esc(r.name)}</strong><span class="pill">${prio}${typeLabel}</span>
     </div>
-    <p class="muted small">${fmtDateLong(r.date)}${!isBY && r.est_h ? ` · ${t('race_estimate_label')} ${r.est_h.toFixed(1)} h${isStage ? ` ${t('race_estimate_total')}` : ''}` : ''}</p>
+    <p class="muted small">${isStage && stages.length
+      ? `${fmtDateLong(stages[0].date)} → ${fmtDateLong(stages[stages.length - 1].date)}${restDays ? ` · ${restDays} ${t('race_stage_rest_days_suffix')}` : ''}`
+      : fmtDateLong(r.date)}${!isBY && r.est_h ? ` · ${t('race_estimate_label')} ${r.est_h.toFixed(1)} h${isStage ? ` ${t('race_estimate_total')}` : ''}` : ''}</p>
     <p class="small">${isBY
       ? `${r.dplus_m ? `${Math.round(r.dplus_m)} ${t('race_dplus_lap')}` : '?'}`
-      : `${r.distance_km ? `${r.distance_km} ${t('race_km_unit')}` : '?'}${isStage ? t('race_per_stage') : ''} ${r.dplus_m ? `· ${Math.round(r.dplus_m)} ${t('race_dplus_unit')}${isStage ? t('race_per_stage') : ''}` : ''}`}
+      : `${r.distance_km ? `${r.distance_km} ${t('race_km_unit')}` : '?'}${isStage ? ` ${t('race_stage_total_suffix')}` : ''} ${r.dplus_m ? `· ${Math.round(r.dplus_m)} ${t('race_dplus_unit')}${isStage ? ` ${t('race_stage_total_suffix')}` : ''}` : ''}`}
       ${r.time_limit_h ? `· ${t('race_time_limit')} ${r.time_limit_h} h` : ''}</p>
     <div class="target-slot" style="margin:4px 0">${isBY && r.target_time_h ? `<span class="target-badge">${icon('target')} ${r.target_time_h} ${t('race_target_badge')}</span>` : ''}</div>
     ${r.profile ? profileSvg(JSON.parse(r.profile)) : ''}
     <div class="row" style="margin-top:8px">
       <button onclick="raceModal(${r.id})">${t('btn_edit')}</button>
-      ${!isBY && !isStage && r.target_time_h ? `<button class="primary" onclick="pacingModal(${r.id})">${t('race_pacing_plan_btn')}</button>` : ''}
+      ${!isBY && r.target_time_h ? `<button class="primary" onclick="pacingModal(${r.id})">${t('race_pacing_plan_btn')}</button>` : ''}
     </div>
   </div>`;
 }
@@ -795,7 +799,39 @@ function profileSvg(profile) {
 
 let gpxParsed = null;
 let aidStationsState = [];
+let stagesState = []; // carrera por etapas: un elemento por día {date, km, dplus_m, dminus_m, rest}
 let raceModalType = 'ultra';
+function daysBetweenInclusive(start, end) {
+  const out = []; let d = start, guard = 0;
+  while (d && end && d <= end && guard < 60) { out.push(d); d = addDays(d, 1); guard++; }
+  return out;
+}
+// Regenera las filas de etapas a partir del rango de fechas del formulario, conservando los datos
+// ya introducidos en las fechas que siguen existiendo (para no perder km/D+ ya rellenados solo por
+// ajustar un día el final del rango).
+function regenStageRows() {
+  const start = $('#r-stage-start').value, end = $('#r-stage-end').value;
+  if (!start || !end) return;
+  const byDate = Object.fromEntries(stagesState.map(s => [s.date, s]));
+  stagesState = daysBetweenInclusive(start, end).map(date => byDate[date] || { date, km: null, dplus_m: null, dminus_m: null, rest: false });
+  renderStageList();
+}
+function renderStageList() {
+  const el = $('#stageList'); if (!el) return;
+  let n = 0;
+  el.innerHTML = stagesState.map((s, i) => {
+    const label = s.rest ? '' : `${t('race_stage_n_prefix')}${++n}`;
+    return `<div class="stage-row ${s.rest ? 'is-rest' : ''}">
+      <div class="stage-row-date"><strong>${fmtDateLong(s.date)}</strong>${label ? `<span class="small muted"> · ${label}</span>` : ''}</div>
+      <div class="row stage-row-fields">
+        <input type="number" inputmode="decimal" placeholder="${t('race_stage_km_ph')}" value="${s.km ?? ''}" ${s.rest ? 'disabled' : ''} onchange="stagesState[${i}].km=+this.value||null">
+        <input type="number" inputmode="numeric" placeholder="${t('race_stage_dplus_ph')}" value="${s.dplus_m ?? ''}" ${s.rest ? 'disabled' : ''} onchange="stagesState[${i}].dplus_m=+this.value||null">
+        <input type="number" inputmode="numeric" placeholder="${t('race_stage_dminus_ph')}" value="${s.dminus_m ?? ''}" ${s.rest ? 'disabled' : ''} onchange="stagesState[${i}].dminus_m=+this.value||null">
+        <label class="stage-rest-toggle small"><input type="checkbox" ${s.rest ? 'checked' : ''} onchange="stagesState[${i}].rest=this.checked; renderStageList()"> ${t('race_stage_rest_label')}</label>
+      </div>
+    </div>`;
+  }).join('') || `<p class="small muted">${t('race_stage_empty')}</p>`;
+}
 function raceModal(id) {
   gpxParsed = null;
   const editing = id ? get(`/races`).then(rs => rs.find(r => r.id === id)) : Promise.resolve(null);
@@ -804,6 +840,9 @@ function raceModal(id) {
     raceModalType = ['backyard', 'stage'].includes(r?.type) ? r.type : 'ultra';
     const isBY = raceModalType === 'backyard';
     const isStage = raceModalType === 'stage';
+    stagesState = (isStage && r?.stages) ? (typeof r.stages === 'string' ? JSON.parse(r.stages) : r.stages) : [];
+    const stageStart = stagesState[0]?.date || r?.date || '';
+    const stageEnd = stagesState[stagesState.length - 1]?.date || r?.date || '';
     openModal(`
       <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
       <h2>${r ? t('race_edit_title') : t('race_new_title')}</h2>
@@ -814,10 +853,18 @@ function raceModal(id) {
         <div class="chip ${isBY ? 'selected' : ''}" data-v="backyard" onclick="raceSetType('backyard')">${t('race_type_backyard_chip')}</div>
         <div class="chip ${isStage ? 'selected' : ''}" data-v="stage" onclick="raceSetType('stage')">${t('race_type_stage_chip')}</div>
       </div>
-      <label>${t('race_date_label')} ${isStage ? t('race_date_stage_suffix') : ''}</label><input id="r-date" type="date" value="${r ? r.date : ''}">
+      <div id="rf-date-wrap" style="display:${isStage ? 'none' : ''}">
+        <label>${t('race_date_label')}</label><input id="r-date" type="date" value="${r && !isStage ? r.date : ''}">
+      </div>
       <label>${t('race_start_time_label')}</label><input id="r-start" type="time" value="${r?.start_time || ''}">
       <div id="rf-nstages-wrap" style="display:${isStage ? '' : 'none'}">
-        <label>${t('race_nstages_label')}</label><input id="r-nstages" type="number" inputmode="numeric" min="2" value="${r?.n_stages ?? ''}" placeholder="${t('race_nstages_ph')}">
+        <label>${t('race_stage_range_label')}</label>
+        <div class="row">
+          <div><label class="small muted">${t('race_stage_start_label')}</label><input id="r-stage-start" type="date" value="${stageStart}" onchange="regenStageRows()"></div>
+          <div><label class="small muted">${t('race_stage_end_label')}</label><input id="r-stage-end" type="date" value="${stageEnd}" onchange="regenStageRows()"></div>
+        </div>
+        <div id="stageList"></div>
+        <p class="small muted">${t('race_stage_hint')}</p>
       </div>
       <label>${t('race_priority_label')}</label>
       <select id="r-prio">
@@ -825,19 +872,23 @@ function raceModal(id) {
         <option value="B" ${r?.priority === 'B' ? 'selected' : ''}>${t('race_priority_b_opt')}</option>
         <option value="C" ${r?.priority === 'C' ? 'selected' : ''}>${t('race_priority_c_opt')}</option>
       </select>
-      <div class="row">
-        <div id="rf-dist-wrap" style="display:${isBY ? 'none' : ''}"><label id="r-dist-label">${isStage ? t('race_dist_stage_label') : t('race_dist_label')}</label><input id="r-dist" type="number" inputmode="decimal" value="${r?.distance_km ?? ''}"></div>
-        <div><label id="r-dplus-label">${isBY ? t('race_dplus_by_label') : isStage ? t('race_dplus_stage_label') : t('race_dplus_label')}</label><input id="r-dplus" type="number" inputmode="numeric" value="${r?.dplus_m ?? ''}"></div>
+      <div class="row" id="rf-dist-dplus-row" style="display:${isStage ? 'none' : ''}">
+        <div id="rf-dist-wrap" style="display:${isBY ? 'none' : ''}"><label id="r-dist-label">${t('race_dist_label')}</label><input id="r-dist" type="number" inputmode="decimal" value="${r?.distance_km ?? ''}"></div>
+        <div><label id="r-dplus-label">${isBY ? t('race_dplus_by_label') : t('race_dplus_label')}</label><input id="r-dplus" type="number" inputmode="numeric" value="${r?.dplus_m ?? ''}"></div>
       </div>
       <label>${t('race_limit_label')}</label><input id="r-limit" type="number" inputmode="decimal" value="${r?.time_limit_h ?? ''}">
       <label>${t('race_target_label')}${isStage ? t('race_target_stage_suffix') : t('race_target_close')}</label><input id="r-target" type="number" step="0.1" inputmode="decimal" value="${r?.target_time_h ?? ''}" placeholder="${t('race_target_ph')}">
-      <label>${t('race_gpx_label')}</label>
-      <input id="r-gpx" type="file" accept=".gpx">
-      <div id="r-gpx-preview"></div>
+      <div id="rf-gpx-wrap" style="display:${isStage ? 'none' : ''}">
+        <label>${t('race_gpx_label')}</label>
+        <input id="r-gpx" type="file" accept=".gpx">
+        <div id="r-gpx-preview"></div>
+      </div>
       <div class="divider"></div>
-      <label style="margin-top:0">${t('race_aid_label')}</label>
-      <div id="aidList"></div>
-      <button class="ghost" onclick="addAidRow()">${icon('plus')} ${t('race_add_aid')}</button>
+      <div id="rf-aid-wrap" style="display:${isStage ? 'none' : ''}">
+        <label style="margin-top:0">${t('race_aid_label')}</label>
+        <div id="aidList"></div>
+        <button class="ghost" onclick="addAidRow()">${icon('plus')} ${t('race_add_aid')}</button>
+      </div>
       <div class="divider"></div>
       <label>${t('race_notes_label')}</label><textarea id="r-notes">${r ? esc(r.notes || '') : ''}</textarea>
       <div class="row" style="margin-top:14px">
@@ -847,15 +898,28 @@ function raceModal(id) {
     `, { center: true });
     $('#r-gpx').addEventListener('change', handleGpxFile);
     renderAidList();
+    if (isStage) { if (stageStart && stageEnd) regenStageRows(); else renderStageList(); }
   });
 }
 function raceSetType(tp) {
+  const wasStage = raceModalType === 'stage';
   raceModalType = tp;
   $$('#r-type .chip').forEach(c => c.classList.toggle('selected', c.dataset.v === tp));
+  const isStage = tp === 'stage';
+  $('#rf-date-wrap').style.display = isStage ? 'none' : '';
+  $('#rf-nstages-wrap').style.display = isStage ? '' : 'none';
+  $('#rf-dist-dplus-row').style.display = isStage ? 'none' : '';
   $('#rf-dist-wrap').style.display = tp === 'backyard' ? 'none' : '';
-  $('#rf-nstages-wrap').style.display = tp === 'stage' ? '' : 'none';
-  $('#r-dist-label').textContent = tp === 'stage' ? t('race_dist_stage_label') : t('race_dist_label');
-  $('#r-dplus-label').textContent = tp === 'backyard' ? t('race_dplus_by_label') : tp === 'stage' ? t('race_dplus_stage_label') : t('race_dplus_label');
+  $('#rf-gpx-wrap').style.display = isStage ? 'none' : '';
+  $('#rf-aid-wrap').style.display = isStage ? 'none' : '';
+  $('#r-dplus-label').textContent = tp === 'backyard' ? t('race_dplus_by_label') : t('race_dplus_label');
+  if (isStage && !wasStage) {
+    // Al pasar a "por etapas" sin fechas todavía puestas, arrancamos con la fecha de la carrera
+    // (si ya se había puesto) como inicio de un rango de un solo día — el atleta amplía el rango.
+    const d = $('#r-date').value;
+    if (d && !$('#r-stage-start').value) { $('#r-stage-start').value = d; $('#r-stage-end').value = d; }
+    if ($('#r-stage-start').value && $('#r-stage-end').value) regenStageRows(); else renderStageList();
+  }
 }
 function renderAidList() {
   $('#aidList').innerHTML = aidStationsState.map((a, i) => `
@@ -887,20 +951,25 @@ async function handleGpxFile(e) {
   } catch (err) { toast(t('err_gpx_read') + ' ' + err.message); }
 }
 async function saveRace(id) {
+  const isStage = raceModalType === 'stage';
   const body = {
-    name: $('#r-name').value, date: $('#r-date').value, priority: $('#r-prio').value,
+    name: $('#r-name').value, date: isStage ? (stagesState[0]?.date || '') : $('#r-date').value, priority: $('#r-prio').value,
     type: raceModalType,
     start_time: $('#r-start').value || null,
-    distance_km: raceModalType === 'backyard' ? null : ($('#r-dist').value ? +$('#r-dist').value : null),
-    dplus_m: $('#r-dplus').value ? +$('#r-dplus').value : null,
-    n_stages: raceModalType === 'stage' ? (+$('#r-nstages').value || null) : null,
+    distance_km: raceModalType === 'backyard' || isStage ? null : ($('#r-dist').value ? +$('#r-dist').value : null),
+    dplus_m: isStage ? null : ($('#r-dplus').value ? +$('#r-dplus').value : null),
+    stages: isStage ? stagesState : null,
     time_limit_h: $('#r-limit').value ? +$('#r-limit').value : null,
     target_time_h: $('#r-target').value ? +$('#r-target').value : null,
-    aid_stations: aidStationsState.filter(a => a.name && a.km),
+    aid_stations: isStage ? [] : aidStationsState.filter(a => a.name && a.km),
     notes: $('#r-notes').value,
   };
   if (!body.name || !body.date) { toast(t('err_race_required_fields')); return; }
-  if (raceModalType === 'stage' && (!body.n_stages || body.n_stages < 2)) { toast(t('err_race_nstages_min')); return; }
+  if (isStage) {
+    const running = stagesState.filter(s => !s.rest);
+    if (running.length < 2) { toast(t('err_race_nstages_min')); return; }
+    if (running.some(s => !s.km || !s.dplus_m)) { toast(t('err_race_stage_missing_data')); return; }
+  }
   try {
     let race = id ? await patch(`/races/${id}`, body) : await post('/races', body);
     if (gpxParsed) await post(`/races/${race.id}/gpx`, { gpx: await $('#r-gpx').files[0].text() });
@@ -923,10 +992,31 @@ async function pacingModal(id) {
   try { plan = await get(`/races/${id}/pacing`); }
   catch (e) { toast(e.message); return; }
   const feas = (await get(`/races/${id}/estimate`)).feasibility;
+  const feasHtml = feas ? `<p class="small" style="color:${feas.level === 'realista' || feas.level === 'conservador' ? 'var(--accent)' : feas.level === 'optimista' ? 'var(--accent2)' : 'var(--danger)'}">${esc(feas.message)}</p>` : '';
+  if (plan.stages) {
+    // Carrera por etapas: no hay tramo a tramo (no hay GPX por etapa), pero sí un reparto del
+    // objetivo total entre etapas proporcional al km-esfuerzo real de cada una.
+    openModal(`
+      <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
+      <h2>${t('race_pacing_plan_title')}</h2>
+      ${feasHtml}
+      <div class="stat-grid" style="margin:10px 0">
+        <div class="stat"><div class="v">${plan.target_time_h}h</div><div class="l">${t('pacing_target_label')}</div></div>
+      </div>
+      ${plan.stages.map(s => s.rest
+        ? `<div class="split-row"><div class="name">${fmtDateLong(s.date)}</div><div class="t muted">${t('race_stage_rest_label')}</div></div>`
+        : `<div class="split-row">
+            <div class="name">${t('race_stage_n_prefix')}${s.stage_n} <span class="muted small">(${fmtDateLong(s.date)} · ${s.km} km${s.dplus_m ? `, ${Math.round(s.dplus_m)} m D+` : ''})</span></div>
+            <div class="t">${s.estimated_label}${s.pace_min_km ? ` · ${s.pace_min_km} min/km` : ''}</div>
+          </div>`).join('')}
+      <p class="source-note">${t('pacing_stage_source_note')}</p>
+    `, { center: true });
+    return;
+  }
   openModal(`
     <button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
     <h2>${t('race_pacing_plan_title')}</h2>
-    ${feas ? `<p class="small" style="color:${feas.level === 'realista' || feas.level === 'conservador' ? 'var(--accent)' : feas.level === 'optimista' ? 'var(--accent2)' : 'var(--danger)'}">${esc(feas.message)}</p>` : ''}
+    ${feasHtml}
     <div class="stat-grid" style="margin:10px 0">
       <div class="stat"><div class="v">${plan.target_time_h}h</div><div class="l">${t('pacing_target_label')}</div></div>
       <div class="stat"><div class="v">${plan.rest_h}h</div><div class="l">${t('pacing_stops_label')}</div></div>
@@ -1048,6 +1138,7 @@ function zoneModal(zoneCode) {
   openModal(`<button class="ghost close-x" onclick="closeModals()">${icon('x')}</button>
     <h2>${t('zone_modal_title')}</h2>
     <p class="muted small">${t('zone_modal_hint')}</p>
+    ${K.zones_estimated ? `<p class="muted small">${t('zone_modal_estimated')}</p>` : ''}
     ${rows.map(z => `<div class="zone-row">
       <div class="z-badge" style="background:${ZCOLOR[z.zone]}">${z.zone}</div>
       <div class="z-info"><strong>${esc(z.name)}</strong><span class="small muted">${z.bpm[0]}–${z.bpm[1]} ppm</span><p class="small">${esc(z.text)}</p></div>
