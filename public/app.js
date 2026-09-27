@@ -1,5 +1,5 @@
 'use strict';
-/* TrailCoach — app frontend (vanilla JS, sin dependencias) */
+/* ULTRALAB - TRAILCOACH — app frontend (vanilla JS, sin dependencias) */
 
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));

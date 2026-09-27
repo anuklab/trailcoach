@@ -1,4 +1,4 @@
-/* --accent es el verde exacto del isotipo de TrailCoach (#7fd88f); el resto de la paleta
+/* --accent es el verde exacto del isotipo de ULTRALAB - TRAILCOACH (#7fd88f); el resto de la paleta
    deriva de ese mismo verde para que todo el interfaz quede coherente con el logo real. */
 :root, :root[data-theme="dark"] {
   --bg: #0e1512; --panel: #151f19; --panel2: #1a251e; --border: #263a2d;
